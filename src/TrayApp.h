@@ -93,6 +93,7 @@ private:
     void ShowContextMenu();
     void OpenCodex();
     bool ActivateCodexWindow();
+    bool OpenMostRecentBrowserTarget();
     void ClearCompletedPrompts();
     void CopyDiagnosticsToClipboard();
     void HandleTrayMessage(LPARAM lParam);

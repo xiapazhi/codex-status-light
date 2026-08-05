@@ -470,6 +470,9 @@ void TrayApp::HandleTrayMessage(LPARAM lParam)
                 " open_key=" + aggregate.currentPrompt.openKey);
             OpenCurrentPrompt(aggregate.currentPrompt);
         } else {
+            if (OpenMostRecentBrowserTarget()) {
+                return;
+            }
             WebDebugLog::Write(L"Tray", L"left_click no_prompt open_codex");
             OpenCodex();
         }
@@ -886,6 +889,40 @@ void TrayApp::OpenCurrentPrompt(const PromptItem& item)
         WebDebugLog::WriteUtf8(L"Tray", "open app prompt open_key=" + item.openKey);
     }
     OpenCodex();
+}
+
+bool TrayApp::OpenMostRecentBrowserTarget()
+{
+    const WebAccountState webState = webMonitor_.CurrentState();
+    const WebConversationRecord* selected = nullptr;
+    for (const WebConversationRecord& conversation : webState.conversations) {
+        const bool hasTarget =
+            !conversation.activeOwnerBrowserInstanceId.empty() &&
+            conversation.activeOwnerTabId != 0;
+        if (!hasTarget) {
+            continue;
+        }
+
+        if (selected == nullptr || conversation.lastObservedAt > selected->lastObservedAt) {
+            selected = &conversation;
+        }
+    }
+
+    if (selected == nullptr) {
+        return false;
+    }
+
+    if (!webMonitor_.QueueFocusRequest(selected->conversationKey)) {
+        WebDebugLog::WriteUtf8(
+            L"Tray",
+            "left_click no_prompt browser_fallback_failed open_key=" + selected->conversationKey);
+        return false;
+    }
+
+    WebDebugLog::WriteUtf8(
+        L"Tray",
+        "left_click no_prompt browser_fallback_queued open_key=" + selected->conversationKey);
+    return true;
 }
 
 std::string TrayApp::PromptSourceText(PromptSource source) const
