@@ -1,0 +1,9 @@
+{
+  "name": "com.statuslight.web",
+  "description": "StatusLight ChatGPT Web bridge",
+  "path": "C:\\Users\\USER\\AppData\\Local\\StatusLight\\StatusLight.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://pkaefmgibeeemjoilbpopeiffmkbnjoi/"
+  ]
+}

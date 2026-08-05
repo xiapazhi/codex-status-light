@@ -38,6 +38,16 @@ add_executable(StatusLight
     src/IconRenderer.cpp
     src/TrayApp.cpp
     src/JsonValue.cpp
+    src/web/ChatGptConversationStore.cpp
+    src/web/ChatGptAccountAggregator.cpp
+    src/web/WebDiagnostics.cpp
+    src/web/WebDebugLog.cpp
+    src/web/NativeHostProtocol.cpp
+    src/web/NativeHostRegistration.cpp
+    src/web/NativeMessagingHost.cpp
+    src/web/WebBridgePipeServer.cpp
+    src/web/WebSourceController.cpp
+    src/web/WebSelfTest.cpp
 )
 
 target_compile_features(StatusLight PRIVATE cxx_std_17)
@@ -48,6 +58,8 @@ target_compile_definitions(StatusLight PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
 )
+
+target_link_libraries(StatusLight PRIVATE advapi32)
 
 if (MSVC)
     target_compile_options(StatusLight PRIVATE /W4 /permissive- /utf-8)

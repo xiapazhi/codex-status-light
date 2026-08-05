@@ -18,6 +18,7 @@
 #include "DirectoryWatcher.h"
 #include "ProcessMonitor.h"
 #include "StatusReader.h"
+#include "web/WebSourceController.h"
 
 #include <Windows.h>
 #include <Shellapi.h>
@@ -52,6 +53,7 @@ private:
         size_t cancelledCount = 0;
         size_t staleCount = 0;
         size_t unknownCount = 0;
+        WebMonitorHealth monitorHealth = WebMonitorHealth::Normal;
     };
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -85,11 +87,13 @@ private:
     DirectoryWatcher watcher_;
     ProcessMonitor processMonitor_;
     ProcessSnapshot processSnapshot_;
+    WebSourceController webMonitor_;
     IconRenderer iconRenderer_;
     std::set<std::string> acknowledgedCompletedSessions_;
     ULONGLONG startedAtTick_ = 0;
     ULONGLONG noCodexSinceTick_ = 0;
     ULONGLONG lastCalibrationTick_ = 0;
+    ULONGLONG lastWebPollTick_ = 0;
     ULONGLONG visualSinceTick_ = 0;
     AggregateVisual lastVisual_ = AggregateVisual::Completed;
     bool blinkOn_ = true;

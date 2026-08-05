@@ -30,9 +30,13 @@ constexpr UINT kMenuOpenCodex = 2001;
 constexpr UINT kMenuClearCompleted = 2002;
 constexpr UINT kMenuCopyDiagnostics = 2003;
 constexpr UINT kMenuExit = 2004;
+constexpr UINT kMenuToggleWebBridge = 2005;
 constexpr ULONGLONG kCalibrationIntervalMs = 5000;
 constexpr ULONGLONG kStartupNoCodexGraceMs = 15000;
 constexpr ULONGLONG kRuntimeNoCodexGraceMs = 5000;
+constexpr ULONGLONG kWebActivePollIntervalMs = 5000;
+constexpr ULONGLONG kWebConnectingPollIntervalMs = 5000;
+constexpr ULONGLONG kWebIdlePollIntervalMs = 25000;
 constexpr UINT kAnimationTimerMs = 125;
 constexpr ULONGLONG kRunningBreathPeriodMs = 2400;
 constexpr ULONGLONG kFastFlashIntervalMs = 125;
@@ -45,6 +49,8 @@ int TrayApp::Run(HINSTANCE instance, const TrayOptions& options)
 {
     options_ = options;
     startedAtTick_ = GetTickCount64();
+    webMonitor_.Enable();
+    lastWebPollTick_ = startedAtTick_;
 
     if (!CreateHiddenWindow(instance)) {
         return 2;
@@ -120,6 +126,16 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
             return 0;
         case kMenuCopyDiagnostics:
             app->CopyDiagnosticsToClipboard();
+            return 0;
+        case kMenuToggleWebBridge:
+            if (app->webMonitor_.IsEnabled()) {
+                app->webMonitor_.Disable();
+                app->lastWebPollTick_ = 0;
+            } else {
+                app->webMonitor_.Enable();
+                app->lastWebPollTick_ = GetTickCount64();
+            }
+            app->UpdateTrayIcon();
             return 0;
         case kMenuExit:
             DestroyWindow(hwnd);
@@ -208,6 +224,25 @@ void TrayApp::RefreshState()
     readOptions.recentHours = options_.recentHours;
     snapshot_ = reader_.ReadOnce(readOptions);
 
+    const ULONGLONG nowTick = GetTickCount64();
+    const WebAccountState currentWebState = webMonitor_.CurrentState();
+    const bool hasActiveWebTask =
+        currentWebState.waitingCount > 0 ||
+        currentWebState.runningCount > 0;
+    ULONGLONG webPollIntervalMs = kWebIdlePollIntervalMs;
+    if (hasActiveWebTask) {
+        webPollIntervalMs = kWebActivePollIntervalMs;
+    } else if (webMonitor_.IsEnabled() && currentWebState.nativeBridgeClients == 0) {
+        webPollIntervalMs = kWebConnectingPollIntervalMs;
+    }
+    const bool shouldPollWeb =
+        webMonitor_.IsEnabled() &&
+        (lastWebPollTick_ == 0 || nowTick - lastWebPollTick_ >= webPollIntervalMs);
+    if (shouldPollWeb) {
+        webMonitor_.PollOnce();
+        lastWebPollTick_ = nowTick;
+    }
+
     for (const auto& item : snapshot_.sessions) {
         if (item.second.state != TaskState::Completed) {
             acknowledgedCompletedSessions_.erase(item.first);
@@ -268,6 +303,11 @@ void TrayApp::ShowContextMenu()
     }
 
     AppendMenuW(menu, MF_STRING, kMenuOpenCodex, L"打开 Codex");
+    AppendMenuW(
+        menu,
+        MF_STRING,
+        kMenuToggleWebBridge,
+        webMonitor_.IsEnabled() ? L"停用网页桥接" : L"启用网页桥接");
     AppendMenuW(menu, MF_STRING, kMenuClearCompleted, L"清除完成提示");
     AppendMenuW(menu, MF_STRING, kMenuCopyDiagnostics, L"复制诊断信息");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -376,6 +416,12 @@ TrayApp::AggregateSnapshot TrayApp::AggregateSessions() const
         }
     }
 
+    const WebAccountState webState = webMonitor_.CurrentState();
+    aggregate.waitingCount += webState.waitingCount;
+    aggregate.runningCount += webState.runningCount;
+    aggregate.completedCount += webState.completedCount;
+    aggregate.monitorHealth = webState.health;
+
     if (aggregate.waitingCount > 0) {
         aggregate.visual = AggregateVisual::Waiting;
     } else if (aggregate.runningCount > 0) {
@@ -390,7 +436,11 @@ TrayApp::AggregateSnapshot TrayApp::AggregateSessions() const
 IconKey TrayApp::BuildIconKey(const AggregateSnapshot& aggregate) const
 {
     IconKey key;
-    key.warningBadge = snapshot_.hasSourceError || aggregate.staleCount > 0 || aggregate.unknownCount > 0;
+    key.warningBadge = snapshot_.hasSourceError ||
+        aggregate.monitorHealth == WebMonitorHealth::Degraded ||
+        aggregate.monitorHealth == WebMonitorHealth::Error ||
+        aggregate.staleCount > 0 ||
+        aggregate.unknownCount > 0;
     key.blinkOn = true;
 
     const ULONGLONG nowTick = GetTickCount64();
@@ -465,8 +515,10 @@ std::wstring TrayApp::BuildTooltip(const AggregateSnapshot& aggregate) const
         output << L"额度 " << static_cast<int>(snapshot_.quota.effectiveRemaining) << L"%";
     }
 
-    if (snapshot_.hasSourceError) {
-        output << L"   数据异常";
+    if (snapshot_.hasSourceError || aggregate.monitorHealth == WebMonitorHealth::Error) {
+        output << L"   监听异常";
+    } else if (aggregate.monitorHealth == WebMonitorHealth::Degraded) {
+        output << L"   监听部分异常";
     } else if (!watcher_.IsRunning() && !snapshot_.sessionsPath.empty()) {
         output << L"   监听恢复中";
     } else {
@@ -523,6 +575,7 @@ std::wstring TrayApp::BuildDiagnostics(const AggregateSnapshot& aggregate) const
     if (!processSnapshot_.errorMessage.empty()) {
         output << L"Process monitor error: " << processSnapshot_.errorMessage << L"\n";
     }
+    output << webMonitor_.Diagnostics();
 
     return output.str();
 }
@@ -566,6 +619,9 @@ bool TrayApp::HasUserVisibleTask(const AggregateSnapshot& aggregate) const
 
 bool TrayApp::ShouldAutoExit(const AggregateSnapshot& aggregate)
 {
+    if (webMonitor_.IsEnabled()) {
+        return false;
+    }
     if (snapshot_.hasSourceError) {
         return false;
     }

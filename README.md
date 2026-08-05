@@ -15,9 +15,9 @@
 
 # Codex Status Light
 
-Codex Status Light is a lightweight Windows tray indicator for local Codex task status.
+Codex Status Light is a lightweight Windows tray indicator for Codex task status.
 
-It reads local Codex JSONL session files from `%USERPROFILE%\.codex\sessions\**\rollout-*.jsonl` and displays a compact tray icon.
+It reads local Codex JSONL session files from `%USERPROFILE%\.codex\sessions\**\rollout-*.jsonl` and can optionally merge ChatGPT Web task state reported by the companion Chrome MV3 extension.
 
 ## Status
 
@@ -68,6 +68,7 @@ Console diagnostics:
 ```bat
 StatusLight.exe --status
 StatusLight.exe --inspect
+StatusLight.exe --self-test-web
 ```
 
 Optional Codex home override:
@@ -75,3 +76,22 @@ Optional Codex home override:
 ```bat
 StatusLight.exe --status --codex-home "D:\path\.codex"
 ```
+
+ChatGPT Web monitoring is enabled or disabled from the tray context menu. The browser side is a small MV3 extension in `extension/`, and the desktop side uses Chrome Native Messaging plus a per-user Named Pipe. It does not use CDP, a remote debugging port, Node.js, localhost HTTP, cookies, browser storage, or chat content.
+
+Native Host:
+
+```text
+com.statuslight.web
+```
+
+Development setup:
+
+```text
+1. Start StatusLight.exe and enable the web bridge from the tray menu.
+2. StatusLight.exe writes the Native Host manifest and HKCU registration automatically.
+3. Load extension\ as an unpacked Chrome extension.
+4. Confirm Chrome shows extension ID pkaefmgibeeemjoilbpopeiffmkbnjoi.
+```
+
+See `docs\web-extension-protocol.md` and `docs\chatgpt-dom-state-map.md` for the protocol and DOM-state boundary.

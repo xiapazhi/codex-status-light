@@ -1,0 +1,74 @@
+/**
+ * 文件作用：StatusLight Web Companion Popup 样式
+ * 职责范围：
+ * 1. 提供最小连接状态布局
+ * 2. 保持按钮和状态文本可读
+ *
+ * 不负责：
+ * - 展示托盘三色状态
+ * - 展示任务正文或标题
+ *
+ * 维护说明：
+ * - Popup 只做连接诊断，不复制主程序的任务面板
+ */
+body {
+  min-width: 260px;
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #222;
+  background: #fff;
+}
+
+main {
+  padding: 12px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.status-pill {
+  min-width: 48px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.status-on {
+  color: #067a38;
+  background: #dff7e8;
+}
+
+.status-off {
+  color: #9b1c1c;
+  background: #fde2e2;
+}
+
+.status-warn {
+  color: #8a4f00;
+  background: #fff1c2;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button {
+  height: 32px;
+  border: 1px solid #c7c7c7;
+  border-radius: 6px;
+  background: #f7f7f7;
+  color: #222;
+  font-size: 13px;
+}
+
+button[hidden] {
+  display: none;
+}

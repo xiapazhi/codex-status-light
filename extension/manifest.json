@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzQ6wr06J27Y/vRtY85CEV1C+geGN+tT7oknTufybSIG3sThePVK9iFuc/gwB+qPcfUqWsDOZcDuphCyBhDumCcRO2LOFwb3B5tIdVx2dyc+WVCLDcLcFk2rUHxEuLIjDqG5y26uBd25dCfI3hgNyDnvAt3Yv43tcjIRgeCeS9Seboi/BA+caUssG45pqiKMV+lYH6MM9SSv6PMRju72RB+oflvzAvuhIhS92cKujU9bBywciBXNL2WvHdhzGD8W1rOcpJCeqyK94DV8vaDdl9Xpy7tcxMLJEXLtUkf/5VBRvtMZ9U46K2EU3uRz0ZV2wVmye/w7R7V++dJJW2+5w2wIDAQAB",
+  "name": "StatusLight Web Companion",
+  "version": "0.1.0",
+  "description": "Sends ChatGPT task status to the local StatusLight application.",
+  "minimum_chrome_version": "132",
+  "permissions": [
+    "nativeMessaging",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content/conversation-identity.js",
+        "content/state-detector.js",
+        "content/lifecycle.js",
+        "content/chatgpt-observer.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+  "incognito": "not_allowed"
+}

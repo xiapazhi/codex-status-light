@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>StatusLight</title>
+</head>
+<body>
+  <main>
+    <div class="row">
+      <span>StatusLight</span>
+      <strong id="desktopStatus" class="status-pill status-off">未连接</strong>
+    </div>
+    <div class="row">
+      <span>自动互联</span>
+      <strong id="connectStatus" class="status-pill status-off">重试中</strong>
+    </div>
+    <div class="row">
+      <span>下次动作</span>
+      <strong id="nextReconnect">-</strong>
+    </div>
+    <div class="actions">
+      <button id="reconnectButton" type="button">立即连接</button>
+    </div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

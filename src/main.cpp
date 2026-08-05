@@ -15,6 +15,9 @@
 #include "InspectCommand.h"
 #include "StatusCommand.h"
 #include "TrayApp.h"
+#include "web/NativeMessagingHost.h"
+#include "web/WebDebugLog.h"
+#include "web/WebSelfTest.h"
 
 #include <Windows.h>
 
@@ -31,6 +34,8 @@ void PrintUsage()
     std::cout << "  StatusLight.exe --tray [--codex-home <path>] [--max-files <count>] [--recent-hours <hours>] [--poll-seconds <seconds>]\n";
     std::cout << "  StatusLight.exe --status [--codex-home <path>] [--max-files <count>] [--recent-hours <hours>] [--watch] [--poll-seconds <seconds>]\n";
     std::cout << "  StatusLight.exe --inspect [--codex-home <path>] [--max-files <count>] [--recent-hours <hours>] [--watch] [--poll-seconds <seconds>]\n";
+    std::cout << "  StatusLight.exe --self-test-web\n";
+    std::cout << "  StatusLight.exe --web-log-path\n";
 }
 
 bool ReadSizeArgument(int argc, wchar_t* argv[], int* index, size_t* output)
@@ -99,8 +104,15 @@ void AttachConsoleForCommandLineMode()
 
 int wmain(int argc, wchar_t* argv[])
 {
+    if (NativeMessagingHost::LooksLikeNativeHostInvocation(argc, argv)) {
+        NativeMessagingHost host;
+        return host.Run(argc, argv);
+    }
+
     // 无参数启动通常来自双击 EXE。P2 默认进入托盘模式，控制台命令仍保留用于调试。
     bool inspectMode = false;
+    bool selfTestWebMode = false;
+    bool webLogPathMode = false;
     bool statusMode = false;
     bool trayMode = argc == 1;
     InspectOptions inspectOptions;
@@ -111,6 +123,25 @@ int wmain(int argc, wchar_t* argv[])
         const std::wstring argument = argv[index];
         if (argument == L"--inspect") {
             inspectMode = true;
+            selfTestWebMode = false;
+            statusMode = false;
+            trayMode = false;
+            continue;
+        }
+
+        if (argument == L"--self-test-web") {
+            selfTestWebMode = true;
+            inspectMode = false;
+            webLogPathMode = false;
+            statusMode = false;
+            trayMode = false;
+            continue;
+        }
+
+        if (argument == L"--web-log-path") {
+            webLogPathMode = true;
+            inspectMode = false;
+            selfTestWebMode = false;
             statusMode = false;
             trayMode = false;
             continue;
@@ -119,6 +150,8 @@ int wmain(int argc, wchar_t* argv[])
         if (argument == L"--status") {
             statusMode = true;
             inspectMode = false;
+            selfTestWebMode = false;
+            webLogPathMode = false;
             trayMode = false;
             continue;
         }
@@ -127,6 +160,8 @@ int wmain(int argc, wchar_t* argv[])
             trayMode = true;
             statusMode = false;
             inspectMode = false;
+            selfTestWebMode = false;
+            webLogPathMode = false;
             continue;
         }
 
@@ -194,13 +229,13 @@ int wmain(int argc, wchar_t* argv[])
         return 2;
     }
 
-    if (!inspectMode && !statusMode && !trayMode) {
+    if (!inspectMode && !selfTestWebMode && !webLogPathMode && !statusMode && !trayMode) {
         AttachConsoleForCommandLineMode();
         PrintUsage();
         return 0;
     }
 
-    if (inspectMode || statusMode) {
+    if (inspectMode || selfTestWebMode || webLogPathMode || statusMode) {
         AttachConsoleForCommandLineMode();
     }
 
@@ -229,6 +264,16 @@ int wmain(int argc, wchar_t* argv[])
     if (inspectMode) {
         InspectCommand command;
         return command.Run(inspectOptions);
+    }
+
+    if (selfTestWebMode) {
+        WebSelfTest command;
+        return command.Run();
+    }
+
+    if (webLogPathMode) {
+        std::wcout << WebDebugLog::LogPath() << L"\n";
+        return 0;
     }
 
     if (statusMode) {
