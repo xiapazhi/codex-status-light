@@ -222,6 +222,9 @@ void ChatGptConversationStore::MigrateConversationIfNeeded(const PageObserverRec
             existingConversation.operationGeneration = migrated.operationGeneration;
             existingConversation.operationActive = migrated.operationActive;
             existingConversation.activeOwnerObserverId = migrated.activeOwnerObserverId;
+            existingConversation.activeOwnerBrowserInstanceId = migrated.activeOwnerBrowserInstanceId;
+            existingConversation.activeOwnerTabId = migrated.activeOwnerTabId;
+            existingConversation.activeOwnerWindowId = migrated.activeOwnerWindowId;
             existingConversation.stateChangedAt = migrated.stateChangedAt;
             existingConversation.lastObservedAt = migrated.lastObservedAt;
             existingConversation.terminalReason = migrated.terminalReason;
@@ -330,6 +333,9 @@ void ChatGptConversationStore::ChooseOwner(WebConversationRecord* conversation) 
 {
     if (conversation->observerIds.empty()) {
         conversation->activeOwnerObserverId.clear();
+        conversation->activeOwnerBrowserInstanceId.clear();
+        conversation->activeOwnerTabId = 0;
+        conversation->activeOwnerWindowId = 0;
         return;
     }
 
@@ -348,10 +354,19 @@ void ChatGptConversationStore::ChooseOwner(WebConversationRecord* conversation) 
 
     if (bestObserver != observersById_.end()) {
         conversation->activeOwnerObserverId = bestObserver->first;
+        conversation->activeOwnerBrowserInstanceId = bestObserver->second.browserInstanceId;
+        conversation->activeOwnerTabId = bestObserver->second.tabId;
+        conversation->activeOwnerWindowId = bestObserver->second.windowId;
         return;
     }
 
     conversation->activeOwnerObserverId = *conversation->observerIds.begin();
+    const auto fallbackObserver = observersById_.find(conversation->activeOwnerObserverId);
+    if (fallbackObserver != observersById_.end()) {
+        conversation->activeOwnerBrowserInstanceId = fallbackObserver->second.browserInstanceId;
+        conversation->activeOwnerTabId = fallbackObserver->second.tabId;
+        conversation->activeOwnerWindowId = fallbackObserver->second.windowId;
+    }
 }
 
 void ChatGptConversationStore::SetConversationState(

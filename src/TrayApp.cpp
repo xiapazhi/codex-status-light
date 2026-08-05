@@ -42,6 +42,29 @@ constexpr ULONGLONG kRunningBreathPeriodMs = 2400;
 constexpr ULONGLONG kFastFlashIntervalMs = 125;
 constexpr ULONGLONG kRedFlashDurationMs = 3000;
 constexpr ULONGLONG kGreenFlashDurationMs = 1000;
+constexpr ULONGLONG kCompletedPromptVisibleMs = 3000;
+
+struct FindCodexWindowContext {
+    HWND hwnd = nullptr;
+};
+
+BOOL CALLBACK FindCodexWindowProc(HWND hwnd, LPARAM lParam)
+{
+    if (!IsWindowVisible(hwnd)) {
+        return TRUE;
+    }
+
+    wchar_t title[256] {};
+    GetWindowTextW(hwnd, title, static_cast<int>(_countof(title)));
+    const std::wstring windowTitle = title;
+    if (windowTitle.find(L"Codex") == std::wstring::npos) {
+        return TRUE;
+    }
+
+    auto* context = reinterpret_cast<FindCodexWindowContext*>(lParam);
+    context->hwnd = hwnd;
+    return FALSE;
+}
 
 } // namespace
 
@@ -196,7 +219,7 @@ bool TrayApp::AddTrayIcon()
     notifyData_.uCallbackMessage = kTrayMessage;
 
     const AggregateSnapshot aggregate = AggregateSessions();
-    UpdateVisualTiming(aggregate.visual);
+    UpdateVisualTiming(aggregate);
     notifyData_.hIcon = iconRenderer_.GetIcon(BuildIconKey(aggregate));
 
     const std::wstring tooltip = BuildTooltip(aggregate);
@@ -243,12 +266,6 @@ void TrayApp::RefreshState()
         lastWebPollTick_ = nowTick;
     }
 
-    for (const auto& item : snapshot_.sessions) {
-        if (item.second.state != TaskState::Completed) {
-            acknowledgedCompletedSessions_.erase(item.first);
-        }
-    }
-
     UpdateTrayIcon();
 }
 
@@ -276,7 +293,7 @@ void TrayApp::UpdateTrayIcon()
     }
 
     const AggregateSnapshot aggregate = AggregateSessions();
-    UpdateVisualTiming(aggregate.visual);
+    UpdateVisualTiming(aggregate);
     notifyData_.hIcon = iconRenderer_.GetIcon(BuildIconKey(aggregate));
 
     const std::wstring tooltip = BuildTooltip(aggregate);
@@ -285,11 +302,21 @@ void TrayApp::UpdateTrayIcon()
     Shell_NotifyIconW(NIM_MODIFY, &notifyData_);
 }
 
-void TrayApp::UpdateVisualTiming(AggregateVisual visual)
+void TrayApp::UpdateVisualTiming(const AggregateSnapshot& aggregate)
 {
     const ULONGLONG nowTick = GetTickCount64();
-    if (visualSinceTick_ == 0 || visual != lastVisual_) {
-        lastVisual_ = visual;
+    const std::string promptStableId = aggregate.hasPrompt ? aggregate.currentPrompt.stableId : "";
+    const bool isFirstVisual = visualSinceTick_ == 0;
+    const bool visualChanged = aggregate.visual != lastVisual_;
+    const bool promptChanged = promptStableId != lastPromptStableId_;
+    const bool shouldRestartFlash =
+        isFirstVisual ||
+        visualChanged ||
+        (promptChanged && aggregate.visual != AggregateVisual::Completed);
+
+    lastPromptStableId_ = promptStableId;
+    if (shouldRestartFlash) {
+        lastVisual_ = aggregate.visual;
         visualSinceTick_ = nowTick;
         blinkOn_ = true;
     }
@@ -322,17 +349,38 @@ void TrayApp::ShowContextMenu()
 
 void TrayApp::OpenCodex()
 {
+    if (ActivateCodexWindow()) {
+        return;
+    }
+
     HINSTANCE result = ShellExecuteW(nullptr, L"open", L"codex", nullptr, nullptr, SW_SHOWNORMAL);
     if (reinterpret_cast<INT_PTR>(result) <= 32) {
         ShellExecuteW(nullptr, L"open", L"Codex.exe", nullptr, nullptr, SW_SHOWNORMAL);
     }
 }
 
+bool TrayApp::ActivateCodexWindow()
+{
+    FindCodexWindowContext context;
+    EnumWindows(FindCodexWindowProc, reinterpret_cast<LPARAM>(&context));
+    if (context.hwnd == nullptr) {
+        return false;
+    }
+
+    ShowWindow(context.hwnd, SW_RESTORE);
+    SetForegroundWindow(context.hwnd);
+    return true;
+}
+
 void TrayApp::ClearCompletedPrompts()
 {
-    for (const auto& item : snapshot_.sessions) {
-        if (item.second.state == TaskState::Completed) {
-            acknowledgedCompletedSessions_.insert(item.first);
+    std::vector<PromptItem> promptItems;
+    AppendAppPromptItems(&promptItems);
+    AppendBrowserPromptItems(&promptItems);
+    for (const PromptItem& item : promptItems) {
+        if (item.stage == PromptStage::Completed) {
+            acknowledgedCompletedPromptIds_.insert(item.stableId);
+            completedPromptFirstSeenTick_.erase(item.stableId);
         }
     }
     UpdateTrayIcon();
@@ -374,11 +422,12 @@ void TrayApp::HandleTrayMessage(LPARAM lParam)
         return;
     }
 
-    if (lParam == WM_LBUTTONDBLCLK) {
+    if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK) {
         const AggregateSnapshot aggregate = AggregateSessions();
-        OpenCodex();
-        if (aggregate.visual == AggregateVisual::Completed) {
-            ClearCompletedPrompts();
+        if (aggregate.hasPrompt) {
+            OpenCurrentPrompt(aggregate.currentPrompt);
+        } else {
+            OpenCodex();
         }
     }
 }
@@ -386,51 +435,205 @@ void TrayApp::HandleTrayMessage(LPARAM lParam)
 TrayApp::AggregateSnapshot TrayApp::AggregateSessions() const
 {
     AggregateSnapshot aggregate;
+    std::vector<PromptItem> promptItems;
+    AppendAppPromptItems(&promptItems);
+    AppendBrowserPromptItems(&promptItems);
+
+    for (int guard = 0; guard < 8; ++guard) {
+        PromptItem selected;
+        if (!SelectPromptItem(promptItems, &selected)) {
+            break;
+        }
+
+        if (selected.stage != PromptStage::Completed) {
+            aggregate.currentPrompt = selected;
+            aggregate.hasPrompt = true;
+            break;
+        }
+
+        const ULONGLONG nowTick = GetTickCount64();
+        const auto firstSeen = completedPromptFirstSeenTick_.find(selected.stableId);
+        if (firstSeen == completedPromptFirstSeenTick_.end()) {
+            completedPromptFirstSeenTick_[selected.stableId] = nowTick;
+            aggregate.currentPrompt = selected;
+            aggregate.hasPrompt = true;
+            break;
+        }
+
+        if (nowTick - firstSeen->second < kCompletedPromptVisibleMs) {
+            aggregate.currentPrompt = selected;
+            aggregate.hasPrompt = true;
+            break;
+        }
+
+        AcknowledgeCompletedPromptBatch(promptItems);
+        promptItems.clear();
+        AppendAppPromptItems(&promptItems);
+        AppendBrowserPromptItems(&promptItems);
+    }
+
+    for (const PromptItem& item : promptItems) {
+        if (acknowledgedCompletedPromptIds_.find(item.stableId) != acknowledgedCompletedPromptIds_.end()) {
+            continue;
+        }
+
+        if (item.source == PromptSource::App) {
+            aggregate.hasAppPrompt = true;
+        } else if (item.source == PromptSource::Browser) {
+            aggregate.hasBrowserPrompt = true;
+        }
+
+        if (item.stage == PromptStage::Waiting) {
+            ++aggregate.waitingCount;
+        } else if (item.stage == PromptStage::Completed) {
+            ++aggregate.completedCount;
+        } else if (item.stage == PromptStage::Running) {
+            ++aggregate.runningCount;
+        }
+    }
 
     for (const auto& item : snapshot_.sessions) {
-        const SessionState& session = item.second;
-        switch (session.state) {
-        case TaskState::WaitingInput:
-            aggregate.waitingCount++;
-            break;
-        case TaskState::Running:
-            aggregate.runningCount++;
-            break;
-        case TaskState::Completed:
-            if (acknowledgedCompletedSessions_.find(item.first) == acknowledgedCompletedSessions_.end()) {
-                aggregate.completedCount++;
-            }
-            break;
-        case TaskState::Failed:
-            aggregate.failedCount++;
-            break;
-        case TaskState::Cancelled:
-            aggregate.cancelledCount++;
-            break;
-        case TaskState::Stale:
+        if (item.second.state == TaskState::Stale) {
             aggregate.staleCount++;
-            break;
-        case TaskState::Unknown:
+        } else if (item.second.state == TaskState::Unknown) {
             aggregate.unknownCount++;
-            break;
         }
     }
 
     const WebAccountState webState = webMonitor_.CurrentState();
-    aggregate.waitingCount += webState.waitingCount;
-    aggregate.runningCount += webState.runningCount;
-    aggregate.completedCount += webState.completedCount;
     aggregate.monitorHealth = webState.health;
 
-    if (aggregate.waitingCount > 0) {
-        aggregate.visual = AggregateVisual::Waiting;
-    } else if (aggregate.runningCount > 0) {
-        aggregate.visual = AggregateVisual::Running;
-    } else {
-        aggregate.visual = AggregateVisual::Completed;
+    if (aggregate.hasPrompt) {
+        if (aggregate.currentPrompt.stage == PromptStage::Waiting) {
+            aggregate.visual = AggregateVisual::Waiting;
+        } else if (aggregate.currentPrompt.stage == PromptStage::Running) {
+            aggregate.visual = AggregateVisual::Running;
+        } else {
+            aggregate.visual = AggregateVisual::Completed;
+        }
     }
-
     return aggregate;
+}
+
+void TrayApp::AppendAppPromptItems(std::vector<PromptItem>* items) const
+{
+    for (const auto& item : snapshot_.sessions) {
+        const SessionState& session = item.second;
+        PromptItem prompt;
+        prompt.source = PromptSource::App;
+        prompt.openKey = session.sessionId;
+        prompt.changedAtMs = session.lastEventMs;
+
+        if (session.state == TaskState::WaitingInput) {
+            prompt.stage = PromptStage::Waiting;
+            prompt.stableId = "A:waiting:" + session.sessionId;
+            items->push_back(prompt);
+            continue;
+        }
+
+        if (session.state == TaskState::Running) {
+            prompt.stage = PromptStage::Running;
+            prompt.stableId = "A:running:" + session.sessionId;
+            items->push_back(prompt);
+            continue;
+        }
+
+        if (session.state == TaskState::Completed ||
+            session.state == TaskState::Failed ||
+            session.state == TaskState::Cancelled) {
+            prompt.stage = PromptStage::Completed;
+            prompt.stableId = AppPromptStableId(session);
+            if (acknowledgedCompletedPromptIds_.find(prompt.stableId) == acknowledgedCompletedPromptIds_.end()) {
+                items->push_back(prompt);
+            }
+        }
+    }
+}
+
+void TrayApp::AppendBrowserPromptItems(std::vector<PromptItem>* items) const
+{
+    const WebAccountState webState = webMonitor_.CurrentState();
+    for (const WebConversationRecord& conversation : webState.conversations) {
+        PromptItem prompt;
+        prompt.source = PromptSource::Browser;
+        prompt.openKey = conversation.conversationKey;
+        prompt.changedAtMs = conversation.stateChangedAt;
+
+        if (conversation.state == WebConversationState::WaitingInput) {
+            prompt.stage = PromptStage::Waiting;
+            prompt.stableId = "B:waiting:" + conversation.conversationKey;
+            items->push_back(prompt);
+            continue;
+        }
+
+        if (conversation.state == WebConversationState::Running) {
+            prompt.stage = PromptStage::Running;
+            prompt.stableId = "B:running:" + conversation.conversationKey;
+            items->push_back(prompt);
+            continue;
+        }
+
+        if (conversation.state == WebConversationState::TerminalSuccess ||
+            conversation.state == WebConversationState::TerminalFailed ||
+            conversation.state == WebConversationState::TerminalCancelled) {
+            prompt.stage = PromptStage::Completed;
+            prompt.stableId = BrowserPromptStableId(conversation);
+            if (acknowledgedCompletedPromptIds_.find(prompt.stableId) == acknowledgedCompletedPromptIds_.end()) {
+                items->push_back(prompt);
+            }
+        }
+    }
+}
+
+bool TrayApp::SelectPromptItem(const std::vector<PromptItem>& items, PromptItem* selected) const
+{
+    bool found = false;
+    for (const PromptItem& item : items) {
+        if (acknowledgedCompletedPromptIds_.find(item.stableId) != acknowledgedCompletedPromptIds_.end()) {
+            continue;
+        }
+
+        if (!found ||
+            PromptPriority(item.stage) > PromptPriority(selected->stage) ||
+            (PromptPriority(item.stage) == PromptPriority(selected->stage) && item.changedAtMs > selected->changedAtMs)) {
+            *selected = item;
+            found = true;
+        }
+    }
+    return found;
+}
+
+void TrayApp::AcknowledgeCompletedPromptBatch(const std::vector<PromptItem>& items) const
+{
+    for (const PromptItem& item : items) {
+        if (item.stage != PromptStage::Completed) {
+            continue;
+        }
+
+        acknowledgedCompletedPromptIds_.insert(item.stableId);
+        completedPromptFirstSeenTick_.erase(item.stableId);
+    }
+}
+
+std::string TrayApp::AppPromptStableId(const SessionState& session) const
+{
+    return "A:completed:" + session.sessionId + ":" + session.taskId + ":" + session.lastEventTime;
+}
+
+std::string TrayApp::BrowserPromptStableId(const WebConversationRecord& conversation) const
+{
+    return "B:completed:" + conversation.conversationKey + ":" + std::to_string(conversation.operationGeneration);
+}
+
+int TrayApp::PromptPriority(PromptStage stage) const
+{
+    if (stage == PromptStage::Waiting) {
+        return 3;
+    }
+    if (stage == PromptStage::Completed) {
+        return 2;
+    }
+    return 1;
 }
 
 IconKey TrayApp::BuildIconKey(const AggregateSnapshot& aggregate) const
@@ -442,6 +645,8 @@ IconKey TrayApp::BuildIconKey(const AggregateSnapshot& aggregate) const
         aggregate.staleCount > 0 ||
         aggregate.unknownCount > 0;
     key.blinkOn = true;
+    key.appMarker = aggregate.hasAppPrompt;
+    key.browserMarker = aggregate.hasBrowserPrompt;
 
     const ULONGLONG nowTick = GetTickCount64();
     const ULONGLONG visualAgeMs = visualSinceTick_ == 0 ? 0 : nowTick - visualSinceTick_;
@@ -502,7 +707,11 @@ std::wstring TrayApp::BuildTooltip(const AggregateSnapshot& aggregate) const
         aggregate.cancelledCount;
 
     output << L"Codex Status Light\n";
-    output << L"当前 " << TaskVisualText(aggregate.visual) << L"\n";
+    if (aggregate.hasPrompt) {
+        output << PromptText(aggregate.currentPrompt) << L"\n";
+    } else {
+        output << L"当前 " << TaskVisualText(aggregate.visual) << L"\n";
+    }
     output << L"等待 " << aggregate.waitingCount
         << L"   运行 " << aggregate.runningCount
         << L"   完成 " << completedLikeCount << L"\n";
@@ -594,6 +803,19 @@ std::wstring TrayApp::Widen(const std::string& value) const
     return result;
 }
 
+std::wstring TrayApp::PromptText(const PromptItem& item) const
+{
+    std::wstring output;
+    if (item.stage == PromptStage::Waiting) {
+        output += L"等待人工介入";
+    } else if (item.stage == PromptStage::Completed) {
+        output += L"完成";
+    } else {
+        output += L"运行中";
+    }
+    return output;
+}
+
 std::wstring TrayApp::TaskVisualText(AggregateVisual visual) const
 {
     switch (visual) {
@@ -605,6 +827,16 @@ std::wstring TrayApp::TaskVisualText(AggregateVisual visual) const
     default:
         return L"完成";
     }
+}
+
+void TrayApp::OpenCurrentPrompt(const PromptItem& item)
+{
+    if (item.source == PromptSource::Browser) {
+        if (webMonitor_.QueueFocusRequest(item.openKey)) {
+            return;
+        }
+    }
+    OpenCodex();
 }
 
 bool TrayApp::HasUserVisibleTask(const AggregateSnapshot& aggregate) const

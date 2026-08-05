@@ -23,8 +23,12 @@ function hasElement(root, selector) {
 
 function hasStopControl(root) {
   return hasElement(root, 'button[data-testid="stop-button"]') ||
+    hasElement(root, 'button[data-testid*="stop" i]') ||
     hasElement(root, 'button[aria-label="Stop streaming"]') ||
-    hasElement(root, 'button[aria-label="Stop generating"]')
+    hasElement(root, 'button[aria-label="Stop generating"]') ||
+    hasElement(root, 'button[aria-label*="Stop" i]') ||
+    hasElement(root, 'button[aria-label*="停止" i]') ||
+    hasElement(root, 'button[aria-label*="终止" i]')
 }
 
 function hasProgress(root) {

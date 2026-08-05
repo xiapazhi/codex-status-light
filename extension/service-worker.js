@@ -17,8 +17,17 @@ const CHATGPT_URL_PATTERN = 'https://chatgpt.com/*'
 const RECONNECT_DELAYS_MS = [1000, 5000, 15000, 30000, 60000]
 const MAX_FAST_RECONNECT_ATTEMPTS = 10
 const CONNECT_ATTEMPT_TIMEOUT_MS = 5000
+const HEARTBEAT_INTERVAL_MS = 1000
 const SLOW_RECONNECT_DELAY_MS = 60000
 const DIAGNOSTIC_STORAGE_KEY = 'statuslightDiagnostic'
+const ICON_ANIMATION_INTERVAL_MS = 125
+const ICON_RUNNING_BREATH_PERIOD_MS = 2400
+const ICON_FAST_FLASH_INTERVAL_MS = 125
+const ICON_WAITING_FLASH_DURATION_MS = 3000
+const ICON_COMPLETED_FLASH_DURATION_MS = 1000
+const ICON_COMPLETED_VISIBLE_MS = 3000
+const ICON_TAB_STATE_TTL_MS = 30000
+const WEB_IDLE_STABLE_MS = 2000
 const CONTENT_SCRIPT_FILES = [
   'content/conversation-identity.js',
   'content/state-detector.js',
@@ -34,6 +43,10 @@ let connectAttemptTimer = null
 let lastDesktopConnected = false
 let connectionAbnormal = false
 let connectionGeneration = 0
+let lastIconVisual = 'idle'
+let lastIconVisualSince = Date.now()
+const conversationStatusByKey = new Map()
+const tabConversationKeyById = new Map()
 let diagnosticState = {
   nativeConnected: false,
   desktopConnected: false,
@@ -80,6 +93,268 @@ function makeMessage(type, payload = {}) {
     sentAt: Date.now(),
     ...payload,
   }
+}
+
+function blendColor(lowColor, highColor, level) {
+  const safeLevel = Math.max(0, Math.min(10, level))
+  const red = lowColor[0] + Math.round((highColor[0] - lowColor[0]) * safeLevel / 10)
+  const green = lowColor[1] + Math.round((highColor[1] - lowColor[1]) * safeLevel / 10)
+  const blue = lowColor[2] + Math.round((highColor[2] - lowColor[2]) * safeLevel / 10)
+  return `rgb(${red}, ${green}, ${blue})`
+}
+
+function iconCenterColor(visual, now) {
+  const visualAgeMs = now - lastIconVisualSince
+  if (visual === 'running') {
+    const phaseMs = now % ICON_RUNNING_BREATH_PERIOD_MS
+    const halfPeriodMs = ICON_RUNNING_BREATH_PERIOD_MS / 2
+    const risingMs = phaseMs <= halfPeriodMs ? phaseMs : ICON_RUNNING_BREATH_PERIOD_MS - phaseMs
+    const level = Math.round(risingMs * 10 / halfPeriodMs)
+    return blendColor([205, 122, 0], [255, 196, 0], level)
+  }
+
+  if (visual === 'waiting') {
+    const shouldBlink = visualAgeMs < ICON_WAITING_FLASH_DURATION_MS
+    const blinkOn = Math.floor(now / ICON_FAST_FLASH_INTERVAL_MS) % 2 === 0
+    return shouldBlink && blinkOn ? 'rgb(255, 49, 49)' : 'rgb(150, 19, 27)'
+  }
+
+  if (visual === 'completed') {
+    const shouldBlink = visualAgeMs < ICON_COMPLETED_FLASH_DURATION_MS
+    const blinkOn = Math.floor(now / ICON_FAST_FLASH_INTERVAL_MS) % 2 === 0
+    return shouldBlink && blinkOn ? 'rgb(34, 220, 116)' : 'rgb(21, 125, 72)'
+  }
+
+  return 'rgb(21, 125, 72)'
+}
+
+function drawActionIcon(visual) {
+  if (typeof OffscreenCanvas === 'undefined') {
+    return
+  }
+
+  const now = Date.now()
+  const centerColor = iconCenterColor(visual, now)
+  const canvas = new OffscreenCanvas(32, 32)
+  const context = canvas.getContext('2d')
+  if (!context) {
+    return
+  }
+
+  context.clearRect(0, 0, 32, 32)
+  context.beginPath()
+  context.arc(16, 16, 13, 0, Math.PI * 2)
+  context.fillStyle = 'rgba(22, 24, 29, 0.95)'
+  context.fill()
+
+  context.beginPath()
+  context.arc(16, 16, 10, 0, Math.PI * 2)
+  context.fillStyle = centerColor
+  context.fill()
+
+  context.beginPath()
+  context.arc(16, 16, 14, 0, Math.PI * 2)
+  context.strokeStyle = centerColor
+  context.lineWidth = 2
+  context.stroke()
+
+  try {
+    chrome.action.setIcon({
+      imageData: context.getImageData(0, 0, 32, 32),
+    }, () => {
+      void chrome.runtime.lastError
+    })
+  } catch (error) {
+    saveDiagnostic({
+      lastEvent: 'set_action_icon_failed',
+      lastError: errorText(error),
+    })
+  }
+}
+
+function tabVisualFromState(state) {
+  if (state === 'waiting') {
+    return 'waiting'
+  }
+  if (state === 'running') {
+    return 'running'
+  }
+  if (state === 'terminal_success' || state === 'terminal_failed' || state === 'terminal_cancelled') {
+    return 'completed'
+  }
+  return 'idle'
+}
+
+function isActiveVisual(visual) {
+  return visual === 'running' || visual === 'waiting'
+}
+
+function isTerminalState(state) {
+  return state === 'terminal_success' ||
+    state === 'terminal_failed' ||
+    state === 'terminal_cancelled'
+}
+
+function buildConversationKey(browserInstanceId, message, tabId) {
+  const conversation = message.conversation || {}
+  if (conversation.kind === 'persistent' && conversation.id) {
+    return `${browserInstanceId}:conversation:${conversation.id}`
+  }
+
+  const documentId = message.documentId || 'unknown'
+  return `${browserInstanceId}:temporary:${tabId}:${documentId}`
+}
+
+function setConversationVisual(conversation, visual, observedAt) {
+  if (conversation.visual !== visual) {
+    conversation.visual = visual
+    conversation.stateChangedAt = observedAt
+  }
+  conversation.updatedAt = observedAt
+}
+
+function completeConversation(conversation, observedAt, now) {
+  conversation.operationActive = false
+  setConversationVisual(conversation, 'completed', observedAt)
+  conversation.completedUntil = now + ICON_COMPLETED_VISIBLE_MS
+}
+
+function removeTabConversation(tabId) {
+  const conversationKey = tabConversationKeyById.get(tabId)
+  tabConversationKeyById.delete(tabId)
+  if (!conversationKey) {
+    return
+  }
+
+  const conversation = conversationStatusByKey.get(conversationKey)
+  if (!conversation) {
+    return
+  }
+
+  conversation.tabIds.delete(tabId)
+  if (conversation.tabIds.size === 0) {
+    conversationStatusByKey.delete(conversationKey)
+  }
+}
+
+function currentActionVisual() {
+  const now = Date.now()
+  let hasRunning = false
+  let hasCompleted = false
+  for (const [conversationKey, record] of conversationStatusByKey.entries()) {
+    if (now - record.updatedAt > ICON_TAB_STATE_TTL_MS) {
+      conversationStatusByKey.delete(conversationKey)
+      continue
+    }
+
+    if (record.completedUntil > 0 && now <= record.completedUntil) {
+      hasCompleted = true
+      continue
+    }
+
+    if (record.visual === 'waiting') {
+      return 'waiting'
+    }
+    if (record.visual === 'running') {
+      hasRunning = true
+    }
+  }
+
+  if (hasCompleted) {
+    return 'completed'
+  }
+  if (hasRunning) {
+    return 'running'
+  }
+  return 'idle'
+}
+
+function updateActionIcon() {
+  const visual = currentActionVisual()
+  const now = Date.now()
+  if (visual !== lastIconVisual) {
+    lastIconVisual = visual
+    lastIconVisualSince = now
+  }
+  drawActionIcon(visual)
+}
+
+function rememberTabState(message, tabId) {
+  if (message.type !== 'tab_state') {
+    return
+  }
+
+  const now = Date.now()
+  const observedAt = typeof message.observedAt === 'number' ? message.observedAt : now
+  const browserInstanceId = message.browserInstanceId || 'unknown'
+  const conversationKey = buildConversationKey(browserInstanceId, message, tabId)
+  const visual = tabVisualFromState(message.state)
+  let conversation = conversationStatusByKey.get(conversationKey)
+  if (!conversation) {
+    conversation = {
+      visual: 'idle',
+      stateChangedAt: observedAt,
+      updatedAt: observedAt,
+      operationActive: false,
+      operationGeneration: 0,
+      handledTerminalGeneration: 0,
+      completedUntil: 0,
+      tabIds: new Set(),
+    }
+    conversationStatusByKey.set(conversationKey, conversation)
+  }
+
+  conversation.tabIds.add(tabId)
+  tabConversationKeyById.set(tabId, conversationKey)
+
+  const hasVisibleCompletion = conversation.visual === 'completed' && conversation.completedUntil > now
+  if ((visual === 'idle' || visual === 'completed') && hasVisibleCompletion) {
+    conversation.updatedAt = observedAt
+    updateActionIcon()
+    return
+  }
+
+  if (isActiveVisual(visual)) {
+    if (!conversation.operationActive) {
+      conversation.operationGeneration += 1
+      conversation.operationActive = true
+    }
+    conversation.completedUntil = 0
+    setConversationVisual(conversation, visual, observedAt)
+    updateActionIcon()
+    return
+  }
+
+  if (isTerminalState(message.state)) {
+    if (!conversation.operationActive) {
+      updateActionIcon()
+      return
+    }
+    if (conversation.handledTerminalGeneration === conversation.operationGeneration) {
+      updateActionIcon()
+      return
+    }
+
+    conversation.handledTerminalGeneration = conversation.operationGeneration
+    completeConversation(conversation, observedAt, now)
+    updateActionIcon()
+    return
+  }
+
+  if (visual === 'idle' && isActiveVisual(conversation.visual)) {
+    const stableEnough = observedAt - conversation.stateChangedAt >= WEB_IDLE_STABLE_MS
+    if (stableEnough && conversation.handledTerminalGeneration !== conversation.operationGeneration) {
+      conversation.handledTerminalGeneration = conversation.operationGeneration
+      completeConversation(conversation, observedAt, now)
+    } else {
+      conversation.updatedAt = observedAt
+    }
+    updateActionIcon()
+    return
+  }
+
+  setConversationVisual(conversation, 'idle', observedAt)
+  updateActionIcon()
 }
 
 async function getBrowserInstanceId() {
@@ -218,6 +493,10 @@ function connectNative() {
         requestAllSnapshots()
       }
     }
+
+    if (message.command && message.command.type === 'focus_tab') {
+      executeFocusCommand(message.command)
+    }
   })
 
   connectedPort.onDisconnect.addListener(() => {
@@ -244,6 +523,32 @@ function connectNative() {
     lastMessageType: 'extension_hello',
   })
   return nativePort
+}
+
+async function sendHeartbeat() {
+  const browserInstanceId = await getBrowserInstanceId()
+  postToNative(makeMessage('extension_heartbeat', {
+    browserInstanceId,
+  }))
+}
+
+async function executeFocusCommand(command) {
+  try {
+    if (typeof command.windowId === 'number' && command.windowId > 0) {
+      await chrome.windows.update(command.windowId, { focused: true })
+    }
+    await chrome.tabs.update(command.tabId, { active: true })
+    postToNative(makeMessage('focus_tab_result', {
+      requestId: command.requestId,
+      ok: true,
+    }))
+  } catch (error) {
+    postToNative(makeMessage('focus_tab_result', {
+      requestId: command.requestId || '',
+      ok: false,
+      error: errorText(error),
+    }))
+  }
 }
 
 function postToNative(message) {
@@ -326,7 +631,13 @@ async function forwardContentMessage(message, sender) {
   saveDiagnostic({
     lastEvent: 'content_message_received',
     lastMessageType: message.type || 'unknown',
+    lastObservedState: message.state || '',
+    lastObservedReason: message.reason || '',
   })
+  rememberTabState({
+    ...message,
+    browserInstanceId,
+  }, tab.id)
   postToNative({
     ...message,
     browserInstanceId,
@@ -435,6 +746,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 })
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+  removeTabConversation(tabId)
+  updateActionIcon()
   const browserInstanceId = await getBrowserInstanceId()
   postToNative(makeMessage('tab_removed', { browserInstanceId, tabId }))
 })
@@ -446,6 +759,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 
   if (changeInfo.discarded || changeInfo.frozen) {
+    removeTabConversation(tabId)
+    updateActionIcon()
     const browserInstanceId = await getBrowserInstanceId()
     postToNative(makeMessage('tab_suspended', {
       browserInstanceId,
@@ -475,7 +790,10 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 updateBadge()
+updateActionIcon()
 saveDiagnostic({
   lastEvent: 'service_worker_ready',
 })
 connectNative()
+setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS)
+setInterval(updateActionIcon, ICON_ANIMATION_INTERVAL_MS)

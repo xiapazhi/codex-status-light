@@ -24,6 +24,8 @@ if (!window.__StatusLightObserverInstalled) {
   let lastScanAt = 0
   let trailingTimer = null
   let lastUrl = window.location.href
+  let observer = null
+  let isContextInvalidated = false
 
   function makeMessage(type, payload = {}) {
     return {
@@ -35,11 +37,44 @@ if (!window.__StatusLightObserverInstalled) {
     }
   }
 
+  function stopObserver() {
+    isContextInvalidated = true
+    if (trailingTimer) {
+      clearTimeout(trailingTimer)
+      trailingTimer = null
+    }
+    if (observer) {
+      observer.disconnect()
+    }
+    window.__StatusLightObserverInstalled = false
+  }
+
+  function isInvalidatedError(error) {
+    return error && String(error.message || error).includes('Extension context invalidated')
+  }
+
   function postPayload(payload) {
-    chrome.runtime.sendMessage({
-      channel: STATUSLIGHT_CHANNEL,
-      payload,
-    }).catch(() => {})
+    if (isContextInvalidated) {
+      return
+    }
+
+    try {
+      const result = chrome.runtime.sendMessage({
+        channel: STATUSLIGHT_CHANNEL,
+        payload,
+      })
+      if (result && typeof result.catch === 'function') {
+        result.catch((error) => {
+          if (isInvalidatedError(error)) {
+            stopObserver()
+          }
+        })
+      }
+    } catch (error) {
+      if (isInvalidatedError(error)) {
+        stopObserver()
+      }
+    }
   }
 
   function buildStatePayload() {
@@ -58,6 +93,10 @@ if (!window.__StatusLightObserverInstalled) {
   }
 
   function scanNow(force = false) {
+    if (isContextInvalidated) {
+      return
+    }
+
     if (window.StatusLightLifecycle.suspended) {
       postPayload(makeMessage('tab_suspended', {
         documentId,
@@ -84,6 +123,10 @@ if (!window.__StatusLightObserverInstalled) {
   }
 
   function scheduleScan() {
+    if (isContextInvalidated) {
+      return
+    }
+
     const now = Date.now()
     const elapsed = now - lastScanAt
     if (elapsed >= THROTTLE_MS) {
@@ -121,7 +164,11 @@ if (!window.__StatusLightObserverInstalled) {
       document.body
   }
 
-  const observer = new MutationObserver(() => {
+  observer = new MutationObserver(() => {
+    if (isContextInvalidated) {
+      return
+    }
+
     watchUrlChanges()
     scheduleScan()
   })

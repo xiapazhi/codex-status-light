@@ -55,7 +55,13 @@ bool IconKey::operator<(const IconKey& other) const
     if (warningBadge != other.warningBadge) {
         return warningBadge < other.warningBadge;
     }
-    return blinkOn < other.blinkOn;
+    if (blinkOn != other.blinkOn) {
+        return blinkOn < other.blinkOn;
+    }
+    if (appMarker != other.appMarker) {
+        return appMarker < other.appMarker;
+    }
+    return browserMarker < other.browserMarker;
 }
 
 IconRenderer::~IconRenderer()
@@ -107,6 +113,7 @@ HICON IconRenderer::CreateIcon(const IconKey& key)
 
     DrawQuotaRing(pixels, kIconSize, key);
     DrawCircle(pixels, kIconSize, 16, 16, 10, CenterColor(key));
+    DrawSourceMarkers(pixels, kIconSize, key);
     if (key.warningBadge) {
         DrawWarningBadge(pixels, kIconSize);
     }
@@ -186,6 +193,49 @@ void IconRenderer::DrawWarningBadge(unsigned int* pixels, int size)
     }
     pixels[27 * size + 24] = Argb(255, 255, 255, 255);
     pixels[27 * size + 25] = Argb(255, 255, 255, 255);
+}
+
+void IconRenderer::DrawSourceMarkers(unsigned int* pixels, int size, const IconKey& key)
+{
+    if (!key.appMarker && !key.browserMarker) {
+        return;
+    }
+
+    if (key.appMarker) {
+        DrawSourceArc(pixels, size, 225.0, 315.0);
+    }
+    if (key.browserMarker) {
+        DrawSourceArc(pixels, size, 45.0, 135.0);
+    }
+}
+
+void IconRenderer::DrawSourceArc(unsigned int* pixels, int size, double startAngle, double endAngle)
+{
+    const int centerX = 16;
+    const int centerY = 16;
+    const unsigned int shadowColor = Argb(150, 0, 0, 0);
+    const unsigned int fillColor = Argb(255, 250, 252, 255);
+
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const double dx = static_cast<double>(x - centerX);
+            const double dy = static_cast<double>(y - centerY);
+            const double distance = std::sqrt(dx * dx + dy * dy);
+            if (distance < 6.9 || distance > 10.7) {
+                continue;
+            }
+
+            double angle = std::atan2(dx, -dy) * 180.0 / 3.14159265358979323846;
+            if (angle < 0.0) {
+                angle += 360.0;
+            }
+            if (angle < startAngle || angle > endAngle) {
+                continue;
+            }
+
+            pixels[y * size + x] = distance < 7.6 || distance > 10.1 ? shadowColor : fillColor;
+        }
+    }
 }
 
 unsigned int IconRenderer::CenterColor(const IconKey& key) const

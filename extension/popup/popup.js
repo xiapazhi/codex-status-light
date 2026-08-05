@@ -64,12 +64,15 @@ function setConnectStatus(response) {
 }
 
 function updateCountdown() {
+  const nextActionRow = document.getElementById('nextActionRow')
   const nextReconnect = document.getElementById('nextReconnect')
   if (!lastStatusResponse || lastStatusResponse.desktopConnected) {
+    nextActionRow.hidden = true
     nextReconnect.textContent = '-'
     return
   }
 
+  nextActionRow.hidden = false
   const nextReconnectAt = lastStatusResponse.nextReconnectAt || 0
   if (!nextReconnectAt) {
     nextReconnect.textContent = '马上重试'

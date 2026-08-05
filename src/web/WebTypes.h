@@ -80,6 +80,9 @@ struct WebConversationRecord {
     std::string conversationKey;
     std::set<std::string> observerIds;
     std::string activeOwnerObserverId;
+    std::string activeOwnerBrowserInstanceId;
+    int activeOwnerTabId = 0;
+    int activeOwnerWindowId = 0;
     WebConversationState state = WebConversationState::Unknown;
     uint64_t operationGeneration = 0;
     bool operationActive = false;

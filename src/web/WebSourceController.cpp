@@ -92,6 +92,8 @@ void WebSourceController::Disable()
     store_.ClearAll();
     browserInstances_.clear();
     observersByTab_.clear();
+    observerIdByFocusRequest_.clear();
+    pendingFocusCommands_.clear();
     lastSequenceByObserver_.clear();
     reconnectAttempts_ = 0;
     noClientPollCount_ = 0;
@@ -151,6 +153,33 @@ std::wstring WebSourceController::Diagnostics() const
     return diagnostics_.Build(currentState_, enabled_);
 }
 
+bool WebSourceController::QueueFocusRequest(const std::string& conversationKey)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const WebConversationRecord& conversation : currentState_.conversations) {
+        const bool isTargetConversation = conversation.conversationKey == conversationKey;
+        const bool hasBrowserTarget =
+            !conversation.activeOwnerBrowserInstanceId.empty() &&
+            conversation.activeOwnerTabId != 0;
+        if (!isTargetConversation || !hasBrowserTarget) {
+            continue;
+        }
+
+        PendingFocusCommand command;
+        command.requestId = "focus-" + std::to_string(nextFocusRequestId_++);
+        command.browserInstanceId = conversation.activeOwnerBrowserInstanceId;
+        command.observerId = conversation.activeOwnerObserverId;
+        command.tabId = conversation.activeOwnerTabId;
+        command.windowId = conversation.activeOwnerWindowId;
+        pendingFocusCommands_.push_back(command);
+        WebDebugLog::WriteUtf8(L"WebSource", "queue focus_tab request_id=" + command.requestId);
+        return true;
+    }
+
+    WebDebugLog::WriteUtf8(L"WebSource", "queue focus_tab failed conversation=" + conversationKey);
+    return false;
+}
+
 std::string WebSourceController::HandleBridgeMessage(const std::string& message)
 {
     JsonValue root;
@@ -190,6 +219,12 @@ std::string WebSourceController::HandleParsedMessage(const JsonValue& root)
         RefreshStateLocked(WebMonitorHealth::Normal, L"");
         return type == "ping" ? Pong() : Ack();
     }
+    if (type == "extension_heartbeat") {
+        return HandleExtensionHeartbeat(root);
+    }
+    if (type == "focus_tab_result") {
+        return ApplyFocusTabResult(root);
+    }
     if (type == "snapshot_begin") {
         std::lock_guard<std::mutex> lock(mutex_);
         store_.ClearAll();
@@ -218,6 +253,75 @@ std::string WebSourceController::HandleParsedMessage(const JsonValue& root)
     WebDebugLog::WriteUtf8(L"WebSource", "unknown message type=" + type);
     RefreshStateLocked(WebMonitorHealth::Degraded, NativeHostProtocol::Utf8ToWide("unknown message type: " + type));
     return NativeHostProtocol::MakeProtocolError("unknown_type");
+}
+
+std::string WebSourceController::HandleExtensionHeartbeat(const JsonValue& root)
+{
+    std::string browserInstanceId;
+    if (!ReadRequiredString(root, "browserInstanceId", &browserInstanceId)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++protocolErrorCount_;
+        RefreshStateLocked(WebMonitorHealth::Degraded, L"invalid extension_heartbeat message");
+        return NativeHostProtocol::MakeProtocolError("invalid_extension_heartbeat");
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    browserInstances_.insert(browserInstanceId);
+    RefreshStateLocked(WebMonitorHealth::Normal, L"");
+    for (auto iterator = pendingFocusCommands_.begin(); iterator != pendingFocusCommands_.end(); ++iterator) {
+        if (iterator->browserInstanceId != browserInstanceId) {
+            continue;
+        }
+
+        const PendingFocusCommand command = *iterator;
+        pendingFocusCommands_.erase(iterator);
+        observerIdByFocusRequest_[command.requestId] = command.observerId;
+        WebDebugLog::WriteUtf8(L"WebSource", "dispatch focus_tab request_id=" + command.requestId);
+        return MakeAckWithFocusCommandLocked(command);
+    }
+
+    return Ack();
+}
+
+std::string WebSourceController::ApplyFocusTabResult(const JsonValue& root)
+{
+    std::string requestId;
+    if (!ReadRequiredString(root, "requestId", &requestId)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++protocolErrorCount_;
+        RefreshStateLocked(WebMonitorHealth::Degraded, L"invalid focus_tab_result message");
+        return NativeHostProtocol::MakeProtocolError("invalid_focus_tab_result");
+    }
+
+    bool ok = false;
+    ReadOptionalBool(root, "ok", &ok);
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto request = observerIdByFocusRequest_.find(requestId);
+    if (request == observerIdByFocusRequest_.end()) {
+        return Ack();
+    }
+
+    const std::string observerId = request->second;
+    observerIdByFocusRequest_.erase(request);
+    if (!ok) {
+        store_.RemoveObserver(observerId);
+        lastSequenceByObserver_.erase(observerId);
+        for (auto iterator = observersByTab_.begin(); iterator != observersByTab_.end();) {
+            iterator->second.erase(observerId);
+            if (iterator->second.empty()) {
+                iterator = observersByTab_.erase(iterator);
+            } else {
+                ++iterator;
+            }
+        }
+        WebDebugLog::WriteUtf8(L"WebSource", "focus_tab failed observer_removed=" + observerId);
+    } else {
+        WebDebugLog::WriteUtf8(L"WebSource", "focus_tab ok request_id=" + requestId);
+    }
+
+    RefreshStateLocked(WebMonitorHealth::Normal, L"");
+    return Ack();
 }
 
 std::string WebSourceController::ApplyTabState(const JsonValue& root)
@@ -383,6 +487,19 @@ void WebSourceController::RefreshStateLocked(WebMonitorHealth health, const std:
     currentState_.diagnosticMessage = diagnosticMessage;
 }
 
+std::string WebSourceController::MakeAckWithFocusCommandLocked(const PendingFocusCommand& command) const
+{
+    std::ostringstream output;
+    output
+        << "{\"type\":\"ack\",\"command\":{"
+        << "\"type\":\"focus_tab\","
+        << "\"requestId\":\"" << NativeHostProtocol::JsonEscape(command.requestId) << "\","
+        << "\"tabId\":" << command.tabId << ","
+        << "\"windowId\":" << command.windowId
+        << "}}";
+    return output.str();
+}
+
 bool WebSourceController::ReadRequiredString(const JsonValue& root, const std::string& name, std::string* value)
 {
     const JsonValue* field = root.GetObjectField(name);
@@ -400,6 +517,16 @@ bool WebSourceController::ReadRequiredInt(const JsonValue& root, const std::stri
         return false;
     }
     *value = static_cast<int>(field->numberValue);
+    return true;
+}
+
+bool WebSourceController::ReadOptionalBool(const JsonValue& root, const std::string& name, bool* value)
+{
+    const JsonValue* field = root.GetObjectField(name);
+    if (field == nullptr || !field->IsBool()) {
+        return false;
+    }
+    *value = field->boolValue;
     return true;
 }
 

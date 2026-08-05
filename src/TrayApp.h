@@ -23,8 +23,10 @@
 #include <Windows.h>
 #include <Shellapi.h>
 
+#include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 struct TrayOptions {
     std::wstring codexHome;
@@ -44,8 +46,29 @@ private:
         Completed
     };
 
+    enum class PromptSource {
+        App,
+        Browser
+    };
+
+    enum class PromptStage {
+        Waiting,
+        Completed,
+        Running
+    };
+
+    struct PromptItem {
+        PromptSource source = PromptSource::App;
+        PromptStage stage = PromptStage::Running;
+        std::string stableId;
+        std::string openKey;
+        int64_t changedAtMs = 0;
+    };
+
     struct AggregateSnapshot {
         AggregateVisual visual = AggregateVisual::Completed;
+        PromptItem currentPrompt;
+        bool hasPrompt = false;
         size_t waitingCount = 0;
         size_t runningCount = 0;
         size_t completedCount = 0;
@@ -54,6 +77,8 @@ private:
         size_t staleCount = 0;
         size_t unknownCount = 0;
         WebMonitorHealth monitorHealth = WebMonitorHealth::Normal;
+        bool hasAppPrompt = false;
+        bool hasBrowserPrompt = false;
     };
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -64,18 +89,28 @@ private:
     void RefreshState();
     void StartOrRecoverWatcher();
     void UpdateTrayIcon();
-    void UpdateVisualTiming(AggregateVisual visual);
+    void UpdateVisualTiming(const AggregateSnapshot& aggregate);
     void ShowContextMenu();
     void OpenCodex();
+    bool ActivateCodexWindow();
     void ClearCompletedPrompts();
     void CopyDiagnosticsToClipboard();
     void HandleTrayMessage(LPARAM lParam);
     AggregateSnapshot AggregateSessions() const;
+    void AppendAppPromptItems(std::vector<PromptItem>* items) const;
+    void AppendBrowserPromptItems(std::vector<PromptItem>* items) const;
+    bool SelectPromptItem(const std::vector<PromptItem>& items, PromptItem* selected) const;
+    void AcknowledgeCompletedPromptBatch(const std::vector<PromptItem>& items) const;
+    std::string AppPromptStableId(const SessionState& session) const;
+    std::string BrowserPromptStableId(const WebConversationRecord& conversation) const;
+    int PromptPriority(PromptStage stage) const;
     IconKey BuildIconKey(const AggregateSnapshot& aggregate) const;
     std::wstring BuildTooltip(const AggregateSnapshot& aggregate) const;
     std::wstring BuildDiagnostics(const AggregateSnapshot& aggregate) const;
     std::wstring Widen(const std::string& value) const;
+    std::wstring PromptText(const PromptItem& item) const;
     std::wstring TaskVisualText(AggregateVisual visual) const;
+    void OpenCurrentPrompt(const PromptItem& item);
     bool HasUserVisibleTask(const AggregateSnapshot& aggregate) const;
     bool ShouldAutoExit(const AggregateSnapshot& aggregate);
 
@@ -89,12 +124,14 @@ private:
     ProcessSnapshot processSnapshot_;
     WebSourceController webMonitor_;
     IconRenderer iconRenderer_;
-    std::set<std::string> acknowledgedCompletedSessions_;
+    mutable std::set<std::string> acknowledgedCompletedPromptIds_;
+    mutable std::map<std::string, ULONGLONG> completedPromptFirstSeenTick_;
     ULONGLONG startedAtTick_ = 0;
     ULONGLONG noCodexSinceTick_ = 0;
     ULONGLONG lastCalibrationTick_ = 0;
     ULONGLONG lastWebPollTick_ = 0;
     ULONGLONG visualSinceTick_ = 0;
     AggregateVisual lastVisual_ = AggregateVisual::Completed;
+    std::string lastPromptStableId_;
     bool blinkOn_ = true;
 };

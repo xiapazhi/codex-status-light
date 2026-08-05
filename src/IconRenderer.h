@@ -40,6 +40,8 @@ struct IconKey {
     int animationLevel = 0;
     bool warningBadge = false;
     bool blinkOn = false;
+    bool appMarker = false;
+    bool browserMarker = false;
 
     bool operator<(const IconKey& other) const;
 };
@@ -55,6 +57,8 @@ private:
     void DrawCircle(unsigned int* pixels, int size, int centerX, int centerY, int radius, unsigned int color);
     void DrawQuotaRing(unsigned int* pixels, int size, const IconKey& key);
     void DrawWarningBadge(unsigned int* pixels, int size);
+    void DrawSourceMarkers(unsigned int* pixels, int size, const IconKey& key);
+    void DrawSourceArc(unsigned int* pixels, int size, double startAngle, double endAngle);
     unsigned int CenterColor(const IconKey& key) const;
     unsigned int QuotaColor(int quotaBucket) const;
     unsigned int BlendColor(unsigned int lowColor, unsigned int highColor, int level) const;
