@@ -14,6 +14,8 @@
  */
 #include "TrayApp.h"
 
+#include "web/WebDebugLog.h"
+
 #include <Shellapi.h>
 
 #include <algorithm>
@@ -48,6 +50,9 @@ struct FindCodexWindowContext {
     HWND hwnd = nullptr;
 };
 
+std::wstring ProcessPathForWindow(HWND hwnd);
+bool IsCodexProcessWindow(HWND hwnd);
+
 BOOL CALLBACK FindCodexWindowProc(HWND hwnd, LPARAM lParam)
 {
     if (!IsWindowVisible(hwnd)) {
@@ -57,13 +62,43 @@ BOOL CALLBACK FindCodexWindowProc(HWND hwnd, LPARAM lParam)
     wchar_t title[256] {};
     GetWindowTextW(hwnd, title, static_cast<int>(_countof(title)));
     const std::wstring windowTitle = title;
-    if (windowTitle.find(L"Codex") == std::wstring::npos) {
+    if (windowTitle.find(L"Codex") == std::wstring::npos && !IsCodexProcessWindow(hwnd)) {
         return TRUE;
     }
 
     auto* context = reinterpret_cast<FindCodexWindowContext*>(lParam);
     context->hwnd = hwnd;
     return FALSE;
+}
+
+std::wstring ProcessPathForWindow(HWND hwnd)
+{
+    DWORD processId = 0;
+    GetWindowThreadProcessId(hwnd, &processId);
+    if (processId == 0) {
+        return std::wstring();
+    }
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (process == nullptr) {
+        return std::wstring();
+    }
+
+    wchar_t path[4096] {};
+    DWORD pathSize = static_cast<DWORD>(_countof(path));
+    std::wstring result;
+    if (QueryFullProcessImageNameW(process, 0, path, &pathSize) != FALSE) {
+        result.assign(path, pathSize);
+    }
+    CloseHandle(process);
+    return result;
+}
+
+bool IsCodexProcessWindow(HWND hwnd)
+{
+    const std::wstring processPath = ProcessPathForWindow(hwnd);
+    return processPath.find(L"OpenAI.Codex") != std::wstring::npos ||
+        processPath.find(L"\\Codex") != std::wstring::npos;
 }
 
 } // namespace
@@ -368,7 +403,10 @@ bool TrayApp::ActivateCodexWindow()
     }
 
     ShowWindow(context.hwnd, SW_RESTORE);
+    BringWindowToTop(context.hwnd);
     SetForegroundWindow(context.hwnd);
+    SetWindowPos(context.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(context.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     return true;
 }
 
@@ -425,8 +463,14 @@ void TrayApp::HandleTrayMessage(LPARAM lParam)
     if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK) {
         const AggregateSnapshot aggregate = AggregateSessions();
         if (aggregate.hasPrompt) {
+            WebDebugLog::WriteUtf8(
+                L"Tray",
+                "left_click prompt source=" + PromptSourceText(aggregate.currentPrompt.source) +
+                " stage=" + PromptStageText(aggregate.currentPrompt.stage) +
+                " open_key=" + aggregate.currentPrompt.openKey);
             OpenCurrentPrompt(aggregate.currentPrompt);
         } else {
+            WebDebugLog::Write(L"Tray", L"left_click no_prompt open_codex");
             OpenCodex();
         }
     }
@@ -833,10 +877,31 @@ void TrayApp::OpenCurrentPrompt(const PromptItem& item)
 {
     if (item.source == PromptSource::Browser) {
         if (webMonitor_.QueueFocusRequest(item.openKey)) {
+            WebDebugLog::WriteUtf8(L"Tray", "open browser prompt queued open_key=" + item.openKey);
             return;
         }
+        WebDebugLog::WriteUtf8(L"Tray", "open browser prompt fallback_codex open_key=" + item.openKey);
+    }
+    if (item.source == PromptSource::App) {
+        WebDebugLog::WriteUtf8(L"Tray", "open app prompt open_key=" + item.openKey);
     }
     OpenCodex();
+}
+
+std::string TrayApp::PromptSourceText(PromptSource source) const
+{
+    return source == PromptSource::Browser ? "browser" : "app";
+}
+
+std::string TrayApp::PromptStageText(PromptStage stage) const
+{
+    if (stage == PromptStage::Waiting) {
+        return "waiting";
+    }
+    if (stage == PromptStage::Completed) {
+        return "completed";
+    }
+    return "running";
 }
 
 bool TrayApp::HasUserVisibleTask(const AggregateSnapshot& aggregate) const

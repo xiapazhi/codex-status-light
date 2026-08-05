@@ -110,6 +110,8 @@ private:
     std::wstring Widen(const std::string& value) const;
     std::wstring PromptText(const PromptItem& item) const;
     std::wstring TaskVisualText(AggregateVisual visual) const;
+    std::string PromptSourceText(PromptSource source) const;
+    std::string PromptStageText(PromptStage stage) const;
     void OpenCurrentPrompt(const PromptItem& item);
     bool HasUserVisibleTask(const AggregateSnapshot& aggregate) const;
     bool ShouldAutoExit(const AggregateSnapshot& aggregate);
