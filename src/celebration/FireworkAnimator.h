@@ -31,6 +31,7 @@ private:
     void UpdateLaunch(float dt);
     void CreateMainBurst();
     void UpdateBurst(float dt);
+    void TriggerSecondaryBursts();
     void UpdateParticles(float dt);
     void RemoveExpiredParticles();
     void AddIgnitionParticles();
@@ -38,6 +39,9 @@ private:
     void AddBurstSparkParticles(const Vec2& origin);
     void AddMeteorSparkParticles(const Vec2& origin);
     void AddFineSparkParticles(const Vec2& origin);
+    void AddSecondaryBurstParticles(const SecondaryBurstSeed& seed);
+    void AddAfterglowParticles(const Vec2& origin);
+    void AddSecondaryBurstSeeds(const Vec2& origin);
     Particle MakeRocketTrail();
     Particle MakeBurstParticle(const Vec2& origin, ParticleKind kind, float angle, float speed, const ColorF& color);
     bool IsSceneFinished() const;

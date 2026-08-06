@@ -91,6 +91,14 @@ struct Shockwave {
     bool active = false;
 };
 
+struct SecondaryBurstSeed {
+    Vec2 position;
+    float ageSeconds = 0.0f;
+    float triggerSeconds = 0.16f;
+    ColorF color;
+    bool triggered = false;
+};
+
 struct FireworkPlayParameters {
     Vec2 launchPointLocal;
     Vec2 burstPointLocal;
@@ -106,6 +114,7 @@ struct FireworkScene {
     FlashCore flashCore;
     Shockwave shockwave;
     std::vector<Particle> particles;
+    std::vector<SecondaryBurstSeed> secondaryBursts;
     FireworkPalette palette;
     std::wstring paletteName = L"GoldWhite";
     UINT dpi = 96;

@@ -46,6 +46,7 @@ void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
     scene_.randomSeed = seed;
     scene_.palette = PickPalette();
     scene_.particles.reserve(96);
+    scene_.secondaryBursts.reserve(4);
 
     const Vec2 axis = LaunchAxis(parameters.direction);
     const Vec2 lateral = LateralAxis(parameters.direction);
@@ -160,11 +161,20 @@ void FireworkAnimator::CreateMainBurst()
     AddBurstSparkParticles(origin);
     AddMeteorSparkParticles(origin);
     AddFineSparkParticles(origin);
+    AddAfterglowParticles(origin);
+    AddSecondaryBurstSeeds(origin);
     scene_.mainBurstCreated = true;
 }
 
 void FireworkAnimator::UpdateBurst(float dt)
 {
+    for (SecondaryBurstSeed& seed : scene_.secondaryBursts) {
+        if (!seed.triggered) {
+            seed.ageSeconds += dt;
+        }
+    }
+    TriggerSecondaryBursts();
+
     if (scene_.flashCore.active) {
         scene_.flashCore.ageSeconds += dt;
         if (scene_.flashCore.ageSeconds >= scene_.flashCore.durationSeconds) {
@@ -181,6 +191,17 @@ void FireworkAnimator::UpdateBurst(float dt)
 
     if (!scene_.flashCore.active && !scene_.shockwave.active) {
         scene_.stage = FireworkStage::Afterglow;
+    }
+}
+
+void FireworkAnimator::TriggerSecondaryBursts()
+{
+    for (SecondaryBurstSeed& seed : scene_.secondaryBursts) {
+        if (seed.triggered || seed.ageSeconds < seed.triggerSeconds) {
+            continue;
+        }
+        AddSecondaryBurstParticles(seed);
+        seed.triggered = true;
     }
 }
 
@@ -267,6 +288,49 @@ void FireworkAnimator::AddFineSparkParticles(const Vec2& origin)
     }
 }
 
+void FireworkAnimator::AddSecondaryBurstParticles(const SecondaryBurstSeed& seed)
+{
+    const int sparkCount = random_.RangeInt(8, 12);
+    for (int index = 0; index < sparkCount && scene_.particles.size() < 96; ++index) {
+        const float angle = kTwoPi * static_cast<float>(index) / static_cast<float>(sparkCount) + random_.Range(-0.22f, 0.22f);
+        Particle particle = MakeBurstParticle(seed.position, ParticleKind::SecondarySpark, angle, random_.Range(28.0f, 58.0f), seed.color);
+        particle.startRadius = random_.Range(0.7f, 1.3f);
+        particle.lifetimeSeconds = random_.Range(0.26f, 0.42f);
+        particle.gravity = random_.Range(70.0f, 120.0f);
+        scene_.particles.push_back(particle);
+    }
+}
+
+void FireworkAnimator::AddAfterglowParticles(const Vec2& origin)
+{
+    const int emberCount = random_.RangeInt(10, 14);
+    for (int index = 0; index < emberCount && scene_.particles.size() < 96; ++index) {
+        const float angle = random_.Range(0.25f, 0.75f) * kTwoPi;
+        Particle particle = MakeBurstParticle(origin, ParticleKind::Ember, angle, random_.Range(14.0f, 34.0f), scene_.palette.accent);
+        particle.gravity = random_.Range(110.0f, 160.0f);
+        particle.dragPerSecond = random_.Range(1.6f, 2.8f);
+        particle.lifetimeSeconds = random_.Range(0.30f, 0.55f);
+        particle.startRadius = random_.Range(0.5f, 1.1f);
+        particle.endRadius = 0.05f;
+        particle.endColor = { 0.95f, 0.32f, 0.04f, 0.0f };
+        scene_.particles.push_back(particle);
+    }
+}
+
+void FireworkAnimator::AddSecondaryBurstSeeds(const Vec2& origin)
+{
+    const int seedCount = random_.RangeInt(2, 3);
+    for (int index = 0; index < seedCount; ++index) {
+        const float angle = random_.Range(0.0f, kTwoPi);
+        const float distance = random_.Range(16.0f, 34.0f);
+        SecondaryBurstSeed seed;
+        seed.position = origin + Vec2 { std::cos(angle), std::sin(angle) } * distance;
+        seed.triggerSeconds = random_.Range(0.12f, 0.22f);
+        seed.color = index % 2 == 0 ? scene_.palette.secondary : scene_.palette.accent;
+        scene_.secondaryBursts.push_back(seed);
+    }
+}
+
 Particle FireworkAnimator::MakeRocketTrail()
 {
     const Vec2 axis = LaunchAxis(scene_.direction);
@@ -318,7 +382,13 @@ bool FireworkAnimator::IsSceneFinished() const
     if (scene_.stage != FireworkStage::Afterglow) {
         return false;
     }
-    return scene_.particles.empty() && !scene_.flashCore.active && !scene_.shockwave.active;
+    const bool secondaryComplete = std::all_of(
+        scene_.secondaryBursts.begin(),
+        scene_.secondaryBursts.end(),
+        [](const SecondaryBurstSeed& seed) {
+            return seed.triggered;
+        });
+    return secondaryComplete && scene_.particles.empty() && !scene_.flashCore.active && !scene_.shockwave.active;
 }
 
 FireworkPalette FireworkAnimator::PickPalette()

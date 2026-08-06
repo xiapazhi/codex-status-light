@@ -179,7 +179,8 @@ void FireworkRenderer::DrawParticle(const Particle& particle)
 {
     const float age = NormalizedAge(particle);
     const bool isRocketTrail = particle.kind == ParticleKind::RocketTrail;
-    const float alpha = isRocketTrail ? TrailAlpha(age) : ParticleAlpha(age);
+    const bool isEmber = particle.kind == ParticleKind::Ember;
+    const float alpha = isRocketTrail || isEmber ? TrailAlpha(age) : ParticleAlpha(age);
     const float radius = Lerp(particle.startRadius, particle.endRadius, age);
     ColorF color;
     color.r = Lerp(particle.startColor.r, particle.endColor.r, age);
