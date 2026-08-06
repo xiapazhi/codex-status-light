@@ -1,0 +1,63 @@
+/**
+ * 文件作用：声明完成烟花透明覆盖窗口
+ * 职责范围：
+ * 1. 创建不激活、鼠标穿透、任务栏不可见的 layered window
+ * 2. 管理 32 位 BGRA DIB 绘制表面
+ * 3. P0 阶段绘制一个柔和测试圆点并提交到 UpdateLayeredWindow
+ *
+ * 不负责：
+ * - 决定烟花是否允许播放
+ * - 粒子系统时间推进
+ *
+ * 维护说明：
+ * - DIB 必须使用预乘 Alpha；释放时先选回旧位图，再删除位图和 DC
+ */
+#pragma once
+
+#include "FireworkDiagnostics.h"
+#include "FireworkTypes.h"
+
+#include <Windows.h>
+
+#include <cstdint>
+#include <string>
+
+struct DibSurface {
+    HDC memoryDc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ oldBitmap = nullptr;
+    uint32_t* pixels = nullptr;
+    int width = 0;
+    int height = 0;
+    int stridePixels = 0;
+};
+
+class FireworkOverlayWindow {
+public:
+    FireworkOverlayWindow();
+    ~FireworkOverlayWindow();
+
+    bool Initialize(HINSTANCE instance, FireworkDiagnostics* diagnostics);
+    bool ShowTestDot(const FireworkOverlayPlacement& placement);
+    void Hide();
+    void Shutdown();
+    bool IsVisible() const noexcept;
+
+private:
+    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+    bool EnsureWindow(HINSTANCE instance);
+    bool ResizeSurface(int width, int height);
+    void ReleaseSurface();
+    void Clear();
+    void DrawSoftCircle(const Vec2& center, float radius, const ColorF& color);
+    void BlendPremultipliedPixel(int x, int y, const ColorF& color);
+    bool Present(const POINT& screenPosition);
+    void RecordWin32Error(const wchar_t* operation);
+
+    HINSTANCE instance_ = nullptr;
+    HWND hwnd_ = nullptr;
+    DibSurface surface_;
+    FireworkDiagnostics* diagnostics_ = nullptr;
+    bool visible_ = false;
+};

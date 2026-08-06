@@ -100,10 +100,22 @@ void AttachConsoleForCommandLineMode()
     std::wcerr.clear();
 }
 
+void ConfigureDpiAwareness()
+{
+#ifdef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+    if (SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
+        return;
+    }
+#endif
+    SetProcessDPIAware();
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t* argv[])
 {
+    ConfigureDpiAwareness();
+
     if (NativeMessagingHost::LooksLikeNativeHostInvocation(argc, argv)) {
         NativeMessagingHost host;
         return host.Run(argc, argv);

@@ -26,13 +26,16 @@ namespace {
 
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kSourceChangedMessage = WM_APP + 2;
+constexpr UINT kTrayIconId = 1;
 constexpr UINT_PTR kRefreshTimer = 1001;
 constexpr UINT_PTR kBlinkTimer = 1002;
+constexpr UINT_PTR kFireworkTimerId = 0x5346;
 constexpr UINT kMenuOpenCodex = 2001;
 constexpr UINT kMenuClearCompleted = 2002;
 constexpr UINT kMenuCopyDiagnostics = 2003;
 constexpr UINT kMenuExit = 2004;
 constexpr UINT kMenuToggleWebBridge = 2005;
+constexpr UINT kMenuTestFirework = 2006;
 constexpr ULONGLONG kCalibrationIntervalMs = 5000;
 constexpr ULONGLONG kStartupNoCodexGraceMs = 15000;
 constexpr ULONGLONG kRuntimeNoCodexGraceMs = 5000;
@@ -121,6 +124,7 @@ int TrayApp::Run(HINSTANCE instance, const TrayOptions& options)
         DestroyWindow(hwnd_);
         return 2;
     }
+    celebrationController_.Initialize(instance, hwnd_, kTrayIconId);
 
     SetTimer(hwnd_, kRefreshTimer, static_cast<UINT>(std::max(1, options_.pollSeconds) * 1000), nullptr);
     SetTimer(hwnd_, kBlinkTimer, kAnimationTimerMs, nullptr);
@@ -151,7 +155,9 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
 
     switch (message) {
     case WM_TIMER:
-        if (wParam == kRefreshTimer) {
+        if (wParam == kFireworkTimerId) {
+            app->celebrationController_.OnTimer();
+        } else if (wParam == kRefreshTimer) {
             app->processSnapshot_ = app->processMonitor_.ReadOnce();
             const ULONGLONG nowTick = GetTickCount64();
             const bool needsCalibration = nowTick - app->lastCalibrationTick_ >= kCalibrationIntervalMs;
@@ -185,6 +191,9 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         case kMenuCopyDiagnostics:
             app->CopyDiagnosticsToClipboard();
             return 0;
+        case kMenuTestFirework:
+            app->celebrationController_.PlayTestDot();
+            return 0;
         case kMenuToggleWebBridge:
             if (app->webMonitor_.IsEnabled()) {
                 app->webMonitor_.Disable();
@@ -204,6 +213,7 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         app->HandleTrayMessage(lParam);
         return 0;
     case WM_DESTROY:
+        app->celebrationController_.Shutdown();
         KillTimer(hwnd, kRefreshTimer);
         KillTimer(hwnd, kBlinkTimer);
         app->RemoveTrayIcon();
@@ -249,7 +259,7 @@ bool TrayApp::AddTrayIcon()
     notifyData_ = {};
     notifyData_.cbSize = sizeof(notifyData_);
     notifyData_.hWnd = hwnd_;
-    notifyData_.uID = 1;
+    notifyData_.uID = kTrayIconId;
     notifyData_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     notifyData_.uCallbackMessage = kTrayMessage;
 
@@ -370,6 +380,7 @@ void TrayApp::ShowContextMenu()
         MF_STRING,
         kMenuToggleWebBridge,
         webMonitor_.IsEnabled() ? L"停用网页桥接" : L"启用网页桥接");
+    AppendMenuW(menu, MF_STRING, kMenuTestFirework, L"测试完成烟花");
     AppendMenuW(menu, MF_STRING, kMenuClearCompleted, L"清除完成提示");
     AppendMenuW(menu, MF_STRING, kMenuCopyDiagnostics, L"复制诊断信息");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -832,6 +843,7 @@ std::wstring TrayApp::BuildDiagnostics(const AggregateSnapshot& aggregate) const
         output << L"Process monitor error: " << processSnapshot_.errorMessage << L"\n";
     }
     output << webMonitor_.Diagnostics();
+    output << celebrationController_.BuildDiagnostics();
 
     return output.str();
 }

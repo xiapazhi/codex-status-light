@@ -18,6 +18,7 @@
 #include "DirectoryWatcher.h"
 #include "ProcessMonitor.h"
 #include "StatusReader.h"
+#include "celebration/CelebrationController.h"
 #include "web/WebSourceController.h"
 
 #include <Windows.h>
@@ -127,6 +128,7 @@ private:
     ProcessSnapshot processSnapshot_;
     WebSourceController webMonitor_;
     IconRenderer iconRenderer_;
+    CelebrationController celebrationController_;
     mutable std::set<std::string> acknowledgedCompletedPromptIds_;
     mutable std::map<std::string, ULONGLONG> completedPromptFirstSeenTick_;
     ULONGLONG startedAtTick_ = 0;
