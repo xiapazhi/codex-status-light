@@ -38,7 +38,10 @@ add_executable(StatusLight
     src/IconRenderer.cpp
     src/TrayApp.cpp
     src/celebration/CelebrationController.cpp
+    src/celebration/FireworkAnimator.cpp
     src/celebration/FireworkOverlayWindow.cpp
+    src/celebration/FireworkRenderer.cpp
+    src/celebration/FireworkScene.cpp
     src/celebration/TrayAnchorLocator.cpp
     src/JsonValue.cpp
     src/web/ChatGptConversationStore.cpp

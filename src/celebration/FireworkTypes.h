@@ -16,6 +16,8 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <random>
 
 enum class LaunchDirection {
     Up,
@@ -65,6 +67,16 @@ struct ColorF {
     float a = 1.0f;
 };
 
+struct DibSurface {
+    HDC memoryDc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ oldBitmap = nullptr;
+    uint32_t* pixels = nullptr;
+    int width = 0;
+    int height = 0;
+    int stridePixels = 0;
+};
+
 struct TrayAnchor {
     RECT iconRect {};
     RECT monitorRect {};
@@ -93,3 +105,46 @@ inline float Clamp01(float value)
 {
     return std::max(0.0f, std::min(1.0f, value));
 }
+
+inline float Lerp(float left, float right, float t)
+{
+    return left + (right - left) * Clamp01(t);
+}
+
+inline Vec2 Lerp(const Vec2& left, const Vec2& right, float t)
+{
+    const float clamped = Clamp01(t);
+    return {
+        Lerp(left.x, right.x, clamped),
+        Lerp(left.y, right.y, clamped)
+    };
+}
+
+inline float EaseOutCubic(float t)
+{
+    const float inverse = 1.0f - Clamp01(t);
+    return 1.0f - inverse * inverse * inverse;
+}
+
+class Random {
+public:
+    explicit Random(uint64_t seed)
+        : engine_(static_cast<std::mt19937::result_type>(seed))
+    {
+    }
+
+    float Range(float minimum, float maximum)
+    {
+        std::uniform_real_distribution<float> distribution(minimum, maximum);
+        return distribution(engine_);
+    }
+
+    int RangeInt(int minimum, int maximum)
+    {
+        std::uniform_int_distribution<int> distribution(minimum, maximum);
+        return distribution(engine_);
+    }
+
+private:
+    std::mt19937 engine_;
+};

@@ -15,7 +15,9 @@
 #pragma once
 
 #include "FireworkDiagnostics.h"
+#include "FireworkAnimator.h"
 #include "FireworkOverlayWindow.h"
+#include "FireworkRenderer.h"
 #include "TrayAnchorLocator.h"
 
 #include <Windows.h>
@@ -44,9 +46,11 @@ private:
     HWND mainWindow_ = nullptr;
     UINT trayIconId_ = 0;
     FireworkOverlayWindow overlay_;
+    FireworkRenderer renderer_;
+    FireworkAnimator animator_;
     FireworkDiagnostics diagnostics_;
-    ULONGLONG visibleUntilTick_ = 0;
+    std::optional<FireworkOverlayPlacement> activePlacement_;
+    ULONGLONG animationStartedTick_ = 0;
     UINT retryIndex_ = 0;
     bool timerRunning_ = false;
 };
-

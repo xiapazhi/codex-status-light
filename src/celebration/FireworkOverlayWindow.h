@@ -19,18 +19,7 @@
 
 #include <Windows.h>
 
-#include <cstdint>
 #include <string>
-
-struct DibSurface {
-    HDC memoryDc = nullptr;
-    HBITMAP bitmap = nullptr;
-    HGDIOBJ oldBitmap = nullptr;
-    uint32_t* pixels = nullptr;
-    int width = 0;
-    int height = 0;
-    int stridePixels = 0;
-};
 
 class FireworkOverlayWindow {
 public:
@@ -38,7 +27,8 @@ public:
     ~FireworkOverlayWindow();
 
     bool Initialize(HINSTANCE instance, FireworkDiagnostics* diagnostics);
-    bool ShowTestDot(const FireworkOverlayPlacement& placement);
+    bool Show(const FireworkOverlayPlacement& placement);
+    bool Present(const DibSurface& surface, const POINT& screenPosition);
     void Hide();
     void Shutdown();
     bool IsVisible() const noexcept;
@@ -47,17 +37,10 @@ private:
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
     bool EnsureWindow(HINSTANCE instance);
-    bool ResizeSurface(int width, int height);
-    void ReleaseSurface();
-    void Clear();
-    void DrawSoftCircle(const Vec2& center, float radius, const ColorF& color);
-    void BlendPremultipliedPixel(int x, int y, const ColorF& color);
-    bool Present(const POINT& screenPosition);
     void RecordWin32Error(const wchar_t* operation);
 
     HINSTANCE instance_ = nullptr;
     HWND hwnd_ = nullptr;
-    DibSurface surface_;
     FireworkDiagnostics* diagnostics_ = nullptr;
     bool visible_ = false;
 };

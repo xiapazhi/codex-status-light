@@ -29,8 +29,11 @@ struct FireworkDiagnostics {
     uint32_t playCount = 0;
     uint32_t suppressedCount = 0;
     uint32_t layeredWindowFailures = 0;
+    uint32_t lastAnimationDurationMs = 0;
+    uint32_t lastParticlePeak = 0;
+    uint64_t lastRandomSeed = 0;
+    std::wstring lastPalette = L"P1Launch";
     std::wstring lastSuppressionReason = L"None";
     std::wstring lastWin32Operation;
     DWORD lastWin32Error = 0;
 };
-

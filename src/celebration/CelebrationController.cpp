@@ -20,7 +20,6 @@ namespace {
 
 constexpr UINT_PTR kFireworkTimerId = 0x5346;
 constexpr UINT kFireworkFrameIntervalMs = 16;
-constexpr ULONGLONG kP0VisibleMilliseconds = 1000;
 constexpr UINT kRetryDelaysMs[] = { 80, 160 };
 
 std::wstring YesNo(bool value)
@@ -55,12 +54,23 @@ void CelebrationController::PlayTestDot()
 
 void CelebrationController::OnTimer()
 {
-    const ULONGLONG nowTick = GetTickCount64();
-    if (overlay_.IsVisible() && visibleUntilTick_ > 0 && nowTick >= visibleUntilTick_) {
-        overlay_.Hide();
-        diagnostics_.active = false;
-        visibleUntilTick_ = 0;
-        StopTimer();
+    if (animator_.IsRunning() && activePlacement_.has_value()) {
+        animator_.Tick(std::chrono::steady_clock::now());
+        renderer_.Render(animator_.Scene());
+        overlay_.Present(renderer_.Surface(), activePlacement_->screenPosition);
+
+        const uint32_t particleCount = static_cast<uint32_t>(animator_.Scene().particles.size());
+        if (particleCount > diagnostics_.lastParticlePeak) {
+            diagnostics_.lastParticlePeak = particleCount;
+        }
+
+        if (!animator_.IsRunning()) {
+            overlay_.Hide();
+            diagnostics_.active = false;
+            diagnostics_.lastAnimationDurationMs = static_cast<uint32_t>(GetTickCount64() - animationStartedTick_);
+            activePlacement_.reset();
+            StopTimer();
+        }
         return;
     }
 
@@ -105,10 +115,10 @@ std::wstring CelebrationController::BuildDiagnostics() const
     output << L"Firework play count: " << diagnostics_.playCount << L"\n";
     output << L"Firework suppressed count: " << diagnostics_.suppressedCount << L"\n";
     output << L"Last suppression reason: " << diagnostics_.lastSuppressionReason << L"\n";
-    output << L"Last animation duration: 1000ms\n";
-    output << L"Last particle peak: 0\n";
-    output << L"Last palette: P0TestDot\n";
-    output << L"Last random seed: 0\n";
+    output << L"Last animation duration: " << diagnostics_.lastAnimationDurationMs << L"ms\n";
+    output << L"Last particle peak: " << diagnostics_.lastParticlePeak << L"\n";
+    output << L"Last palette: " << diagnostics_.lastPalette << L"\n";
+    output << L"Last random seed: " << diagnostics_.lastRandomSeed << L"\n";
     output << L"Layered window failures: " << diagnostics_.layeredWindowFailures << L"\n";
     if (!diagnostics_.lastWin32Operation.empty()) {
         output << L"Last layered operation: " << diagnostics_.lastWin32Operation << L"\n";
@@ -134,7 +144,7 @@ bool CelebrationController::TryStartTestDot()
     diagnostics_.overlayWidth = placement.width;
     diagnostics_.overlayHeight = placement.height;
 
-    if (!overlay_.ShowTestDot(placement)) {
+    if (!renderer_.Initialize(placement.width, placement.height)) {
         diagnostics_.suppressedCount++;
         diagnostics_.lastSuppressionReason = L"OverlayInitializationFailed";
         diagnostics_.active = false;
@@ -142,10 +152,34 @@ bool CelebrationController::TryStartTestDot()
         return true;
     }
 
+    if (!overlay_.Show(placement)) {
+        diagnostics_.suppressedCount++;
+        diagnostics_.lastSuppressionReason = L"OverlayInitializationFailed";
+        diagnostics_.active = false;
+        StopTimer();
+        return true;
+    }
+
+    FireworkPlayParameters parameters;
+    parameters.launchPointLocal = {
+        static_cast<float>(placement.launchPointLocal.x),
+        static_cast<float>(placement.launchPointLocal.y)
+    };
+    parameters.direction = placement.direction;
+    parameters.dpi = placement.dpi;
+    animator_.Start(parameters);
+    renderer_.Render(animator_.Scene());
+    overlay_.Present(renderer_.Surface(), placement.screenPosition);
+
+    activePlacement_ = placement;
     diagnostics_.playCount++;
     diagnostics_.active = true;
+    diagnostics_.lastParticlePeak = static_cast<uint32_t>(animator_.Scene().particles.size());
+    diagnostics_.lastRandomSeed = animator_.Scene().randomSeed;
+    diagnostics_.lastAnimationDurationMs = 0;
+    diagnostics_.lastPalette = L"P1Launch";
     diagnostics_.lastSuppressionReason = L"None";
-    visibleUntilTick_ = GetTickCount64() + kP0VisibleMilliseconds;
+    animationStartedTick_ = GetTickCount64();
     retryIndex_ = 0;
     if (!timerRunning_) {
         SetTimer(mainWindow_, kFireworkTimerId, kFireworkFrameIntervalMs, nullptr);
