@@ -115,9 +115,19 @@ struct FireworkOverlayPlacement {
     POINT launchPointLocal {};
 };
 
+struct FireworkLayoutSettings {
+    uint32_t launchHeightPercent = 220;
+    uint32_t burstSizePercent = 170;
+};
+
 inline int ScalePx(int value, UINT dpi)
 {
     return MulDiv(value, static_cast<int>(dpi), 96);
+}
+
+inline int ScalePercent(int value, uint32_t percent)
+{
+    return MulDiv(value, static_cast<int>(percent), 100);
 }
 
 inline float Clamp01(float value)

@@ -23,7 +23,7 @@ public:
     TrayAnchorLocator(HWND trayWindow, UINT trayIconId);
 
     std::optional<TrayAnchor> Locate() const;
-    FireworkOverlayPlacement BuildPlacement(const TrayAnchor& anchor) const;
+    FireworkOverlayPlacement BuildPlacement(const TrayAnchor& anchor, const FireworkLayoutSettings& layout) const;
 
 private:
     std::optional<RECT> GetTrayIconRect() const;
@@ -35,4 +35,3 @@ private:
     HWND trayWindow_ = nullptr;
     UINT trayIconId_ = 0;
 };
-

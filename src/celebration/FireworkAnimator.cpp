@@ -17,19 +17,26 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 
 namespace {
 
-constexpr float kIgnitionSeconds = 0.07f;
-constexpr float kLaunchSeconds = 0.32f;
+constexpr float kIgnitionSeconds = 0.08f;
+constexpr float kLaunchSeconds = 1.40f;
 constexpr float kLargeFrameCutoffSeconds = 0.5f;
 constexpr float kMaximumFrameSeconds = 0.05f;
 constexpr float kTwoPi = 6.28318530717958647692f;
+constexpr size_t kMaxParticles = 128;
 
 uint64_t SeedFromClock()
 {
     return static_cast<uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
+}
+
+float PercentToScale(uint32_t percent)
+{
+    return std::max(0.75f, std::min(2.6f, static_cast<float>(percent) / 100.0f));
 }
 
 } // namespace
@@ -43,16 +50,19 @@ void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
     scene_.stage = FireworkStage::Ignition;
     scene_.dpi = parameters.dpi;
     scene_.direction = parameters.direction;
+    scene_.launchHeightScale = PercentToScale(parameters.launchHeightPercent);
+    scene_.burstScale = PercentToScale(parameters.burstSizePercent);
     scene_.randomSeed = seed;
     scene_.palette = PickPalette();
-    scene_.particles.reserve(96);
+    scene_.particles.reserve(kMaxParticles);
     scene_.secondaryBursts.reserve(4);
 
     const Vec2 axis = LaunchAxis(parameters.direction);
     const Vec2 lateral = LateralAxis(parameters.direction);
-    const float burstDistance = static_cast<float>(ScalePx(64, parameters.dpi));
-    const float driftRange = static_cast<float>(ScalePx(7, parameters.dpi));
-    const float targetJitterRange = static_cast<float>(ScalePx(8, parameters.dpi));
+    const float scaledBurstDistance = static_cast<float>(ScalePx(72, parameters.dpi)) * scene_.launchHeightScale;
+    const float burstDistance = parameters.launchDistancePx > 0.0f ? parameters.launchDistancePx : scaledBurstDistance;
+    const float driftRange = static_cast<float>(ScalePx(8, parameters.dpi)) * scene_.burstScale;
+    const float targetJitterRange = static_cast<float>(ScalePx(10, parameters.dpi)) * scene_.burstScale;
     const float drift = random_.Range(-driftRange, driftRange);
 
     scene_.rocket.start = parameters.launchPointLocal;
@@ -147,15 +157,18 @@ void FireworkAnimator::CreateMainBurst()
     }
 
     const Vec2 origin = scene_.rocket.position;
+    const float burstScale = scene_.burstScale;
     scene_.flashCore.position = origin;
     scene_.flashCore.color = scene_.palette.core;
-    scene_.flashCore.startRadius = static_cast<float>(ScalePx(18, scene_.dpi));
+    scene_.flashCore.durationSeconds = 0.42f;
+    scene_.flashCore.startRadius = static_cast<float>(ScalePx(22, scene_.dpi)) * burstScale;
     scene_.flashCore.active = true;
 
     scene_.shockwave.position = origin;
     scene_.shockwave.color = scene_.palette.primary;
-    scene_.shockwave.startRadius = static_cast<float>(ScalePx(6, scene_.dpi));
-    scene_.shockwave.endRadius = static_cast<float>(ScalePx(42, scene_.dpi));
+    scene_.shockwave.durationSeconds = 0.92f;
+    scene_.shockwave.startRadius = static_cast<float>(ScalePx(8, scene_.dpi)) * burstScale;
+    scene_.shockwave.endRadius = static_cast<float>(ScalePx(52, scene_.dpi)) * burstScale;
     scene_.shockwave.active = true;
 
     AddBurstSparkParticles(origin);
@@ -246,18 +259,18 @@ void FireworkAnimator::AddIgnitionParticles()
 void FireworkAnimator::AddRocketTrailParticles()
 {
     const int count = random_.RangeInt(2, 4);
-    for (int index = 0; index < count && scene_.particles.size() < 96; ++index) {
+    for (int index = 0; index < count && scene_.particles.size() < kMaxParticles; ++index) {
         scene_.particles.push_back(MakeRocketTrail());
     }
 }
 
 void FireworkAnimator::AddBurstSparkParticles(const Vec2& origin)
 {
-    const int sparkCount = random_.RangeInt(26, 32);
-    for (int index = 0; index < sparkCount && scene_.particles.size() < 96; ++index) {
+    const int sparkCount = random_.RangeInt(32, 40);
+    for (int index = 0; index < sparkCount && scene_.particles.size() < kMaxParticles; ++index) {
         const float baseAngle = kTwoPi * static_cast<float>(index) / static_cast<float>(sparkCount);
         const float angle = baseAngle + random_.Range(-0.08f, 0.08f);
-        const float speed = random_.Range(58.0f, 92.0f);
+        const float speed = random_.Range(62.0f, 98.0f) * scene_.burstScale;
         const ColorF color = index % 3 == 0 ? scene_.palette.secondary : scene_.palette.primary;
         scene_.particles.push_back(MakeBurstParticle(origin, ParticleKind::BurstSpark, angle, speed, color));
     }
@@ -265,25 +278,25 @@ void FireworkAnimator::AddBurstSparkParticles(const Vec2& origin)
 
 void FireworkAnimator::AddMeteorSparkParticles(const Vec2& origin)
 {
-    const int meteorCount = random_.RangeInt(6, 8);
-    for (int index = 0; index < meteorCount && scene_.particles.size() < 96; ++index) {
+    const int meteorCount = random_.RangeInt(7, 10);
+    for (int index = 0; index < meteorCount && scene_.particles.size() < kMaxParticles; ++index) {
         const float angle = kTwoPi * static_cast<float>(index) / static_cast<float>(meteorCount) + random_.Range(-0.18f, 0.18f);
-        Particle particle = MakeBurstParticle(origin, ParticleKind::MeteorSpark, angle, random_.Range(96.0f, 128.0f), scene_.palette.accent);
+        Particle particle = MakeBurstParticle(origin, ParticleKind::MeteorSpark, angle, random_.Range(104.0f, 140.0f) * scene_.burstScale, scene_.palette.accent);
         particle.drawTrail = true;
-        particle.startRadius = random_.Range(1.7f, 2.3f);
-        particle.lifetimeSeconds = random_.Range(0.48f, 0.72f);
+        particle.startRadius = random_.Range(2.0f, 2.8f) * scene_.burstScale;
+        particle.lifetimeSeconds = random_.Range(1.10f, 1.42f);
         scene_.particles.push_back(particle);
     }
 }
 
 void FireworkAnimator::AddFineSparkParticles(const Vec2& origin)
 {
-    const int fineSparkCount = random_.RangeInt(8, 12);
-    for (int index = 0; index < fineSparkCount && scene_.particles.size() < 96; ++index) {
+    const int fineSparkCount = random_.RangeInt(12, 16);
+    for (int index = 0; index < fineSparkCount && scene_.particles.size() < kMaxParticles; ++index) {
         const float angle = random_.Range(0.0f, kTwoPi);
-        Particle particle = MakeBurstParticle(origin, ParticleKind::BurstSpark, angle, random_.Range(35.0f, 62.0f), scene_.palette.secondary);
-        particle.startRadius = random_.Range(0.7f, 1.2f);
-        particle.lifetimeSeconds = random_.Range(0.28f, 0.45f);
+        Particle particle = MakeBurstParticle(origin, ParticleKind::BurstSpark, angle, random_.Range(38.0f, 68.0f) * scene_.burstScale, scene_.palette.secondary);
+        particle.startRadius = random_.Range(0.9f, 1.5f) * scene_.burstScale;
+        particle.lifetimeSeconds = random_.Range(0.78f, 1.08f);
         scene_.particles.push_back(particle);
     }
 }
@@ -291,11 +304,11 @@ void FireworkAnimator::AddFineSparkParticles(const Vec2& origin)
 void FireworkAnimator::AddSecondaryBurstParticles(const SecondaryBurstSeed& seed)
 {
     const int sparkCount = random_.RangeInt(8, 12);
-    for (int index = 0; index < sparkCount && scene_.particles.size() < 96; ++index) {
+    for (int index = 0; index < sparkCount && scene_.particles.size() < kMaxParticles; ++index) {
         const float angle = kTwoPi * static_cast<float>(index) / static_cast<float>(sparkCount) + random_.Range(-0.22f, 0.22f);
-        Particle particle = MakeBurstParticle(seed.position, ParticleKind::SecondarySpark, angle, random_.Range(28.0f, 58.0f), seed.color);
-        particle.startRadius = random_.Range(0.7f, 1.3f);
-        particle.lifetimeSeconds = random_.Range(0.26f, 0.42f);
+        Particle particle = MakeBurstParticle(seed.position, ParticleKind::SecondarySpark, angle, random_.Range(30.0f, 62.0f) * scene_.burstScale, seed.color);
+        particle.startRadius = random_.Range(0.9f, 1.6f) * scene_.burstScale;
+        particle.lifetimeSeconds = random_.Range(0.82f, 1.08f);
         particle.gravity = random_.Range(70.0f, 120.0f);
         scene_.particles.push_back(particle);
     }
@@ -303,14 +316,14 @@ void FireworkAnimator::AddSecondaryBurstParticles(const SecondaryBurstSeed& seed
 
 void FireworkAnimator::AddAfterglowParticles(const Vec2& origin)
 {
-    const int emberCount = random_.RangeInt(10, 14);
-    for (int index = 0; index < emberCount && scene_.particles.size() < 96; ++index) {
+    const int emberCount = random_.RangeInt(12, 16);
+    for (int index = 0; index < emberCount && scene_.particles.size() < kMaxParticles; ++index) {
         const float angle = random_.Range(0.25f, 0.75f) * kTwoPi;
-        Particle particle = MakeBurstParticle(origin, ParticleKind::Ember, angle, random_.Range(14.0f, 34.0f), scene_.palette.accent);
+        Particle particle = MakeBurstParticle(origin, ParticleKind::Ember, angle, random_.Range(16.0f, 38.0f) * scene_.burstScale, scene_.palette.accent);
         particle.gravity = random_.Range(110.0f, 160.0f);
         particle.dragPerSecond = random_.Range(1.6f, 2.8f);
-        particle.lifetimeSeconds = random_.Range(0.30f, 0.55f);
-        particle.startRadius = random_.Range(0.5f, 1.1f);
+        particle.lifetimeSeconds = random_.Range(1.02f, 1.34f);
+        particle.startRadius = random_.Range(0.7f, 1.3f) * scene_.burstScale;
         particle.endRadius = 0.05f;
         particle.endColor = { 0.95f, 0.32f, 0.04f, 0.0f };
         scene_.particles.push_back(particle);
@@ -322,10 +335,10 @@ void FireworkAnimator::AddSecondaryBurstSeeds(const Vec2& origin)
     const int seedCount = random_.RangeInt(2, 3);
     for (int index = 0; index < seedCount; ++index) {
         const float angle = random_.Range(0.0f, kTwoPi);
-        const float distance = random_.Range(16.0f, 34.0f);
+        const float distance = random_.Range(18.0f, 40.0f) * scene_.burstScale;
         SecondaryBurstSeed seed;
         seed.position = origin + Vec2 { std::cos(angle), std::sin(angle) } * distance;
-        seed.triggerSeconds = random_.Range(0.12f, 0.22f);
+        seed.triggerSeconds = random_.Range(0.38f, 0.54f);
         seed.color = index % 2 == 0 ? scene_.palette.secondary : scene_.palette.accent;
         scene_.secondaryBursts.push_back(seed);
     }
@@ -345,7 +358,7 @@ Particle FireworkAnimator::MakeRocketTrail()
     particle.gravity = 35.0f;
     particle.dragPerSecond = 3.0f;
     particle.lifetimeSeconds = random_.Range(0.08f, 0.17f);
-    particle.startRadius = random_.Range(1.3f, 2.2f);
+    particle.startRadius = random_.Range(1.5f, 2.5f);
     particle.endRadius = 0.15f;
     particle.startColor = { 1.0f, random_.Range(0.52f, 0.78f), 0.08f, 0.82f };
     particle.endColor = { 1.0f, 0.18f, 0.0f, 0.0f };
@@ -366,8 +379,8 @@ Particle FireworkAnimator::MakeBurstParticle(const Vec2& origin, ParticleKind ki
     particle.velocity = direction * speed;
     particle.gravity = random_.Range(60.0f, 105.0f);
     particle.dragPerSecond = random_.Range(1.0f, 2.2f);
-    particle.lifetimeSeconds = random_.Range(0.42f, 0.68f);
-    particle.startRadius = random_.Range(1.1f, 1.9f);
+    particle.lifetimeSeconds = random_.Range(1.08f, 1.46f);
+    particle.startRadius = random_.Range(1.3f, 2.2f) * scene_.burstScale;
     particle.endRadius = 0.15f;
     particle.startColor = color;
     particle.endColor = { color.r, color.g * 0.45f, color.b * 0.25f, 0.0f };

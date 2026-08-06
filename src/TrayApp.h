@@ -101,6 +101,10 @@ private:
     void UpdateCelebration(const AggregateSnapshot& aggregate);
     void UpdateVisualTiming(const AggregateSnapshot& aggregate);
     void ShowContextMenu();
+    HMENU CreateContextMenu();
+    HMENU CreateFireworksMenu();
+    bool HandleContextMenuCommand(UINT command, bool* keepMenuOpen);
+    bool IsFireworkMenuCommand(UINT command) const;
     void OpenCodex();
     bool ActivateCodexWindow();
     bool OpenMostRecentBrowserTarget();

@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <sstream>
 
 namespace {
@@ -37,6 +38,12 @@ constexpr UINT kMenuExit = 2004;
 constexpr UINT kMenuToggleWebBridge = 2005;
 constexpr UINT kMenuTestFirework = 2006;
 constexpr UINT kMenuToggleFireworks = 2007;
+constexpr UINT kMenuFireworkHeightNormal = 2008;
+constexpr UINT kMenuFireworkHeightHigh = 2009;
+constexpr UINT kMenuFireworkHeightVeryHigh = 2010;
+constexpr UINT kMenuFireworkBurstNormal = 2011;
+constexpr UINT kMenuFireworkBurstLarge = 2012;
+constexpr UINT kMenuFireworkBurstVeryLarge = 2013;
 constexpr ULONGLONG kCalibrationIntervalMs = 5000;
 constexpr ULONGLONG kStartupNoCodexGraceMs = 15000;
 constexpr ULONGLONG kRuntimeNoCodexGraceMs = 5000;
@@ -54,8 +61,20 @@ struct FindCodexWindowContext {
     HWND hwnd = nullptr;
 };
 
+struct PopupMenuCaptureContext {
+    HHOOK hook = nullptr;
+    POINT actualAnchor {};
+    bool captured = false;
+};
+
+thread_local PopupMenuCaptureContext* g_popupMenuCaptureContext = nullptr;
+
 std::wstring ProcessPathForWindow(HWND hwnd);
 bool IsCodexProcessWindow(HWND hwnd);
+bool IsPopupMenuWindow(HWND hwnd);
+void CapturePopupMenuAnchor(HWND hwnd);
+LRESULT CALLBACK PopupMenuCbtHook(int code, WPARAM wParam, LPARAM lParam);
+UINT TrackPopupMenuWithCapturedAnchor(HMENU menu, HWND owner, const POINT& anchor, POINT* actualAnchor);
 
 BOOL CALLBACK FindCodexWindowProc(HWND hwnd, LPARAM lParam)
 {
@@ -103,6 +122,72 @@ bool IsCodexProcessWindow(HWND hwnd)
     const std::wstring processPath = ProcessPathForWindow(hwnd);
     return processPath.find(L"OpenAI.Codex") != std::wstring::npos ||
         processPath.find(L"\\Codex") != std::wstring::npos;
+}
+
+bool IsPopupMenuWindow(HWND hwnd)
+{
+    wchar_t className[32] {};
+    GetClassNameW(hwnd, className, static_cast<int>(_countof(className)));
+    return wcscmp(className, L"#32768") == 0;
+}
+
+void CapturePopupMenuAnchor(HWND hwnd)
+{
+    PopupMenuCaptureContext* context = g_popupMenuCaptureContext;
+    if (context == nullptr || !IsPopupMenuWindow(hwnd)) {
+        return;
+    }
+
+    RECT menuRect {};
+    if (GetWindowRect(hwnd, &menuRect) == FALSE) {
+        return;
+    }
+
+    context->actualAnchor.x = menuRect.left;
+    context->actualAnchor.y = menuRect.top;
+    context->captured = true;
+}
+
+LRESULT CALLBACK PopupMenuCbtHook(int code, WPARAM wParam, LPARAM lParam)
+{
+    if (code == HCBT_MOVESIZE) {
+        auto* menuRect = reinterpret_cast<RECT*>(lParam);
+        PopupMenuCaptureContext* context = g_popupMenuCaptureContext;
+        if (context != nullptr && IsPopupMenuWindow(reinterpret_cast<HWND>(wParam)) && menuRect != nullptr) {
+            context->actualAnchor.x = menuRect->left;
+            context->actualAnchor.y = menuRect->top;
+            context->captured = true;
+        }
+    } else if (code == HCBT_ACTIVATE || code == HCBT_SETFOCUS) {
+        CapturePopupMenuAnchor(reinterpret_cast<HWND>(wParam));
+    }
+    return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+UINT TrackPopupMenuWithCapturedAnchor(HMENU menu, HWND owner, const POINT& anchor, POINT* actualAnchor)
+{
+    PopupMenuCaptureContext captureContext;
+    g_popupMenuCaptureContext = &captureContext;
+    captureContext.hook = SetWindowsHookExW(WH_CBT, PopupMenuCbtHook, nullptr, GetCurrentThreadId());
+
+    const UINT command = TrackPopupMenu(
+        menu,
+        TPM_RIGHTBUTTON | TPM_RETURNCMD,
+        anchor.x,
+        anchor.y,
+        0,
+        owner,
+        nullptr);
+
+    if (captureContext.hook != nullptr) {
+        UnhookWindowsHookEx(captureContext.hook);
+    }
+    g_popupMenuCaptureContext = nullptr;
+
+    if (captureContext.captured && actualAnchor != nullptr) {
+        *actualAnchor = captureContext.actualAnchor;
+    }
+    return command;
 }
 
 } // namespace
@@ -188,35 +273,11 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         app->StartOrRecoverWatcher();
         return 0;
     case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case kMenuOpenCodex:
-            app->OpenCodex();
-            return 0;
-        case kMenuClearCompleted:
-            app->ClearCompletedPrompts();
-            return 0;
-        case kMenuCopyDiagnostics:
-            app->CopyDiagnosticsToClipboard();
-            return 0;
-        case kMenuTestFirework:
-            app->celebrationController_.PlayTestDot();
-            return 0;
-        case kMenuToggleFireworks:
-            app->celebrationController_.ToggleEnabled();
-            return 0;
-        case kMenuToggleWebBridge:
-            if (app->webMonitor_.IsEnabled()) {
-                app->webMonitor_.Disable();
-                app->lastWebPollTick_ = 0;
-            } else {
-                app->webMonitor_.Enable();
-                app->lastWebPollTick_ = GetTickCount64();
+        {
+            bool keepMenuOpen = false;
+            if (app->HandleContextMenuCommand(LOWORD(wParam), &keepMenuOpen)) {
+                return 0;
             }
-            app->UpdateTrayIcon();
-            return 0;
-        case kMenuExit:
-            DestroyWindow(hwnd);
-            return 0;
         }
         break;
     case kTrayMessage:
@@ -232,6 +293,111 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
     }
 
     return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+bool TrayApp::HandleContextMenuCommand(UINT command, bool* keepMenuOpen)
+{
+    if (keepMenuOpen != nullptr) {
+        *keepMenuOpen = false;
+    }
+
+    switch (command) {
+    case kMenuOpenCodex:
+        OpenCodex();
+        return true;
+    case kMenuClearCompleted:
+        ClearCompletedPrompts();
+        return true;
+    case kMenuCopyDiagnostics:
+        CopyDiagnosticsToClipboard();
+        return true;
+    case kMenuTestFirework:
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuToggleFireworks:
+        celebrationController_.ToggleEnabled();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuFireworkHeightNormal:
+        celebrationController_.SetLaunchHeightPercent(100);
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuFireworkHeightHigh:
+        celebrationController_.SetLaunchHeightPercent(220);
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuFireworkHeightVeryHigh:
+        celebrationController_.SetLaunchHeightPercent(500);
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuFireworkBurstNormal:
+        celebrationController_.SetBurstSizePercent(100);
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuFireworkBurstLarge:
+        celebrationController_.SetBurstSizePercent(170);
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuFireworkBurstVeryLarge:
+        celebrationController_.SetBurstSizePercent(240);
+        celebrationController_.PlayTestDot();
+        if (keepMenuOpen != nullptr) {
+            *keepMenuOpen = true;
+        }
+        return true;
+    case kMenuToggleWebBridge:
+        if (webMonitor_.IsEnabled()) {
+            webMonitor_.Disable();
+            lastWebPollTick_ = 0;
+        } else {
+            webMonitor_.Enable();
+            lastWebPollTick_ = GetTickCount64();
+        }
+        UpdateTrayIcon();
+        return true;
+    case kMenuExit:
+        DestroyWindow(hwnd_);
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool TrayApp::IsFireworkMenuCommand(UINT command) const
+{
+    switch (command) {
+    case kMenuTestFirework:
+    case kMenuToggleFireworks:
+    case kMenuFireworkHeightNormal:
+    case kMenuFireworkHeightHigh:
+    case kMenuFireworkHeightVeryHigh:
+    case kMenuFireworkBurstNormal:
+    case kMenuFireworkBurstLarge:
+    case kMenuFireworkBurstVeryLarge:
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool TrayApp::CreateHiddenWindow(HINSTANCE instance)
@@ -416,9 +582,61 @@ void TrayApp::UpdateVisualTiming(const AggregateSnapshot& aggregate)
 
 void TrayApp::ShowContextMenu()
 {
+    POINT requestedAnchor {};
+    GetCursorPos(&requestedAnchor);
+    POINT menuAnchor = requestedAnchor;
+    bool hasMenuAnchor = false;
+    bool showFireworksOnly = false;
+
+    for (;;) {
+        HMENU menu = showFireworksOnly ? CreateFireworksMenu() : CreateContextMenu();
+        if (menu == nullptr) {
+            return;
+        }
+
+        SetForegroundWindow(hwnd_);
+        POINT capturedAnchor {
+            std::numeric_limits<LONG>::min(),
+            std::numeric_limits<LONG>::min()
+        };
+        const UINT command = TrackPopupMenuWithCapturedAnchor(
+            menu,
+            hwnd_,
+            hasMenuAnchor ? menuAnchor : requestedAnchor,
+            &capturedAnchor);
+        const bool capturedMenuPosition =
+            capturedAnchor.x != std::numeric_limits<LONG>::min() &&
+            capturedAnchor.y != std::numeric_limits<LONG>::min();
+        if (!hasMenuAnchor && capturedMenuPosition) {
+            menuAnchor = capturedAnchor;
+            hasMenuAnchor = true;
+        }
+
+        if (command == 0) {
+            DestroyMenu(menu);
+            return;
+        }
+
+        const bool isFireworkCommand = IsFireworkMenuCommand(command);
+        DestroyMenu(menu);
+
+        bool keepMenuOpen = false;
+        if (!HandleContextMenuCommand(command, &keepMenuOpen)) {
+            return;
+        }
+        if (!keepMenuOpen) {
+            return;
+        }
+
+        showFireworksOnly = isFireworkCommand;
+    }
+}
+
+HMENU TrayApp::CreateContextMenu()
+{
     HMENU menu = CreatePopupMenu();
     if (menu == nullptr) {
-        return;
+        return nullptr;
     }
 
     AppendMenuW(menu, MF_STRING, kMenuOpenCodex, L"打开 Codex");
@@ -427,26 +645,67 @@ void TrayApp::ShowContextMenu()
         MF_STRING,
         kMenuToggleWebBridge,
         webMonitor_.IsEnabled() ? L"停用网页桥接" : L"启用网页桥接");
-    HMENU fireworksMenu = CreatePopupMenu();
+
+    HMENU fireworksMenu = CreateFireworksMenu();
     if (fireworksMenu != nullptr) {
-        AppendMenuW(
-            fireworksMenu,
-            MF_STRING | (celebrationController_.IsEnabled() ? MF_CHECKED : MF_UNCHECKED),
-            kMenuToggleFireworks,
-            L"启用");
-        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fireworksMenu), L"完成烟花效果");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fireworksMenu), L"烟花效果");
     }
-    AppendMenuW(menu, MF_STRING, kMenuTestFirework, L"测试完成烟花");
+
     AppendMenuW(menu, MF_STRING, kMenuClearCompleted, L"清除完成提示");
     AppendMenuW(menu, MF_STRING, kMenuCopyDiagnostics, L"复制诊断信息");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kMenuExit, L"退出");
+    return menu;
+}
 
-    POINT cursor {};
-    GetCursorPos(&cursor);
-    SetForegroundWindow(hwnd_);
-    TrackPopupMenu(menu, TPM_RIGHTBUTTON, cursor.x, cursor.y, 0, hwnd_, nullptr);
-    DestroyMenu(menu);
+HMENU TrayApp::CreateFireworksMenu()
+{
+    HMENU fireworksMenu = CreatePopupMenu();
+    if (fireworksMenu == nullptr) {
+        return nullptr;
+    }
+
+    const uint32_t selectedHeightPercent = celebrationController_.LaunchHeightPercent();
+    const uint32_t selectedBurstPercent = celebrationController_.BurstSizePercent();
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (celebrationController_.IsEnabled() ? MF_CHECKED : MF_UNCHECKED),
+        kMenuToggleFireworks,
+        L"启用");
+    AppendMenuW(fireworksMenu, MF_STRING, kMenuTestFirework, L"测试完成烟花");
+    AppendMenuW(fireworksMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (selectedHeightPercent == 100 ? MF_CHECKED : MF_UNCHECKED),
+        kMenuFireworkHeightNormal,
+        L"高度：标准");
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (selectedHeightPercent == 220 ? MF_CHECKED : MF_UNCHECKED),
+        kMenuFireworkHeightHigh,
+        L"高度：高");
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (selectedHeightPercent == 500 ? MF_CHECKED : MF_UNCHECKED),
+        kMenuFireworkHeightVeryHigh,
+        L"高度：半屏");
+    AppendMenuW(fireworksMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (selectedBurstPercent == 100 ? MF_CHECKED : MF_UNCHECKED),
+        kMenuFireworkBurstNormal,
+        L"爆炸：标准");
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (selectedBurstPercent == 170 ? MF_CHECKED : MF_UNCHECKED),
+        kMenuFireworkBurstLarge,
+        L"爆炸：大");
+    AppendMenuW(
+        fireworksMenu,
+        MF_STRING | (selectedBurstPercent == 240 ? MF_CHECKED : MF_UNCHECKED),
+        kMenuFireworkBurstVeryLarge,
+        L"爆炸：很大");
+    return fireworksMenu;
 }
 
 void TrayApp::OpenCodex()

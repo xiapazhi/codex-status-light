@@ -14,6 +14,7 @@
  */
 #include "CelebrationController.h"
 
+#include <algorithm>
 #include <sstream>
 
 namespace {
@@ -25,6 +26,22 @@ constexpr UINT kRetryDelaysMs[] = { 80, 160 };
 std::wstring YesNo(bool value)
 {
     return value ? L"yes" : L"no";
+}
+
+float LaunchDistancePx(const TrayAnchor& anchor, uint32_t launchHeightPercent)
+{
+    if (launchHeightPercent >= 500) {
+        const bool horizontalLaunch =
+            anchor.direction == LaunchDirection::Left ||
+            anchor.direction == LaunchDirection::Right;
+        const LONG monitorSize = horizontalLaunch ?
+            anchor.monitorRect.right - anchor.monitorRect.left :
+            anchor.monitorRect.bottom - anchor.monitorRect.top;
+        return static_cast<float>(std::max<LONG>(1, monitorSize)) * 0.5f;
+    }
+
+    return static_cast<float>(ScalePx(72, anchor.dpi)) *
+        static_cast<float>(launchHeightPercent) / 100.0f;
 }
 
 } // namespace
@@ -109,6 +126,28 @@ bool CelebrationController::IsEnabled() const noexcept
     return settings_.fireworksEnabled;
 }
 
+uint32_t CelebrationController::LaunchHeightPercent() const noexcept
+{
+    return settings_.launchHeightPercent;
+}
+
+uint32_t CelebrationController::BurstSizePercent() const noexcept
+{
+    return settings_.burstSizePercent;
+}
+
+void CelebrationController::SetLaunchHeightPercent(uint32_t percent)
+{
+    settings_.launchHeightPercent = percent;
+    policy_.SaveSettings(settings_);
+}
+
+void CelebrationController::SetBurstSizePercent(uint32_t percent)
+{
+    settings_.burstSizePercent = percent;
+    policy_.SaveSettings(settings_);
+}
+
 void CelebrationController::OnTimer()
 {
     if (animator_.IsRunning() && activePlacement_.has_value()) {
@@ -164,6 +203,8 @@ std::wstring CelebrationController::BuildDiagnostics() const
     output << L"Celebration enabled: " << YesNo(diagnostics_.enabled) << L"\n";
     output << L"Celebration active: " << YesNo(diagnostics_.active) << L"\n";
     output << L"Celebration cooldown: " << settings_.cooldownMilliseconds << L"ms\n";
+    output << L"Firework launch height: " << settings_.launchHeightPercent << L"%\n";
+    output << L"Firework burst size: " << settings_.burstSizePercent << L"%\n";
     output << L"Animations allowed: " << YesNo(environment.animationsAllowed) << L"\n";
     output << L"Notification state: " << environment.notificationState << L"\n";
     output << L"Tray anchor available: " << YesNo(diagnostics_.trayAnchorAvailable) << L"\n";
@@ -196,7 +237,10 @@ bool CelebrationController::TryStartTestDot()
         return false;
     }
 
-    const FireworkOverlayPlacement placement = locator.BuildPlacement(anchor.value());
+    FireworkLayoutSettings layout;
+    layout.launchHeightPercent = settings_.launchHeightPercent;
+    layout.burstSizePercent = settings_.burstSizePercent;
+    const FireworkOverlayPlacement placement = locator.BuildPlacement(anchor.value(), layout);
     diagnostics_.lastLaunchDirection = anchor->direction;
     diagnostics_.lastDpi = anchor->dpi;
     diagnostics_.overlayWidth = placement.width;
@@ -225,6 +269,9 @@ bool CelebrationController::TryStartTestDot()
     };
     parameters.direction = placement.direction;
     parameters.dpi = placement.dpi;
+    parameters.launchHeightPercent = settings_.launchHeightPercent;
+    parameters.burstSizePercent = settings_.burstSizePercent;
+    parameters.launchDistancePx = LaunchDistancePx(anchor.value(), settings_.launchHeightPercent);
     animator_.Start(parameters);
     renderer_.Render(animator_.Scene());
     overlay_.Present(renderer_.Surface(), placement.screenPosition);

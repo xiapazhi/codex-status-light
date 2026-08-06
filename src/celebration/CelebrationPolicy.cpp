@@ -22,6 +22,48 @@ namespace {
 
 const wchar_t* kSettingsKey = L"Software\\CodexStatusLight";
 const wchar_t* kFireworksEnabledValue = L"FireworksEnabled";
+const wchar_t* kLaunchHeightPercentValue = L"FireworkLaunchHeightPercent";
+const wchar_t* kBurstSizePercentValue = L"FireworkBurstSizePercent";
+
+uint32_t NormalizeLaunchHeightPercent(DWORD value)
+{
+    if (value == 100 || value == 220 || value == 500) {
+        return static_cast<uint32_t>(value);
+    }
+    return kDefaultFireworkLaunchHeightPercent;
+}
+
+uint32_t NormalizeBurstSizePercent(DWORD value)
+{
+    if (value == 100 || value == 170 || value == 240) {
+        return static_cast<uint32_t>(value);
+    }
+    return kDefaultFireworkBurstSizePercent;
+}
+
+bool ReadDwordSetting(HKEY key, const wchar_t* name, DWORD* value)
+{
+    DWORD valueSize = sizeof(*value);
+    const LONG readResult = RegQueryValueExW(
+        key,
+        name,
+        nullptr,
+        nullptr,
+        reinterpret_cast<LPBYTE>(value),
+        &valueSize);
+    return readResult == ERROR_SUCCESS && valueSize == sizeof(*value);
+}
+
+void WriteDwordSetting(HKEY key, const wchar_t* name, DWORD value)
+{
+    RegSetValueExW(
+        key,
+        name,
+        0,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&value),
+        sizeof(value));
+}
 
 } // namespace
 
@@ -41,19 +83,22 @@ CelebrationSettings CelebrationPolicy::LoadSettings() const
     }
 
     DWORD value = 1;
-    DWORD valueSize = sizeof(value);
-    const LONG readResult = RegQueryValueExW(
-        key,
-        kFireworksEnabledValue,
-        nullptr,
-        nullptr,
-        reinterpret_cast<LPBYTE>(&value),
-        &valueSize);
-    RegCloseKey(key);
-
-    if (readResult == ERROR_SUCCESS && valueSize == sizeof(value)) {
+    const bool hasEnabledValue = ReadDwordSetting(key, kFireworksEnabledValue, &value);
+    if (hasEnabledValue) {
         settings.fireworksEnabled = value != 0;
     }
+
+    value = kDefaultFireworkLaunchHeightPercent;
+    if (ReadDwordSetting(key, kLaunchHeightPercentValue, &value)) {
+        settings.launchHeightPercent = NormalizeLaunchHeightPercent(value);
+    }
+
+    value = kDefaultFireworkBurstSizePercent;
+    if (ReadDwordSetting(key, kBurstSizePercentValue, &value)) {
+        settings.burstSizePercent = NormalizeBurstSizePercent(value);
+    }
+    RegCloseKey(key);
+
     return settings;
 }
 
@@ -75,13 +120,9 @@ void CelebrationPolicy::SaveSettings(const CelebrationSettings& settings) const
     }
 
     const DWORD value = settings.fireworksEnabled ? 1 : 0;
-    RegSetValueExW(
-        key,
-        kFireworksEnabledValue,
-        0,
-        REG_DWORD,
-        reinterpret_cast<const BYTE*>(&value),
-        sizeof(value));
+    WriteDwordSetting(key, kFireworksEnabledValue, value);
+    WriteDwordSetting(key, kLaunchHeightPercentValue, settings.launchHeightPercent);
+    WriteDwordSetting(key, kBurstSizePercentValue, settings.burstSizePercent);
     RegCloseKey(key);
 }
 
@@ -233,4 +274,3 @@ std::wstring CelebrationPolicy::NotificationStateText(QUERY_USER_NOTIFICATION_ST
         return L"unknown";
     }
 }
-

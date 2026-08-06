@@ -170,9 +170,9 @@ void FireworkRenderer::Clear()
 
 void FireworkRenderer::DrawRocket(const Rocket& rocket)
 {
-    DrawGlowTrail(rocket.previousPosition, rocket.position, 2.2f, { 1.0f, 0.46f, 0.06f, 0.55f });
-    DrawSoftCircle(rocket.position, 5.5f, rocket.glowColor);
-    DrawSoftCircle(rocket.position, 2.2f, rocket.coreColor);
+    DrawGlowTrail(rocket.previousPosition, rocket.position, 2.8f, { 1.0f, 0.48f, 0.06f, 0.68f });
+    DrawSoftCircle(rocket.position, 7.0f, rocket.glowColor);
+    DrawSoftCircle(rocket.position, 2.8f, rocket.coreColor);
 }
 
 void FireworkRenderer::DrawParticle(const Particle& particle)
@@ -230,7 +230,7 @@ void FireworkRenderer::DrawShockwave(const Shockwave& shockwave)
             shockwave.position.x + std::cos(angle) * radius,
             shockwave.position.y + std::sin(angle) * radius
         };
-        DrawSoftCircle(point, 1.1f, color);
+        DrawSoftCircle(point, 1.4f, color);
     }
 }
 

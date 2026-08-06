@@ -104,7 +104,10 @@ struct FireworkPlayParameters {
     Vec2 burstPointLocal;
     LaunchDirection direction = LaunchDirection::Up;
     UINT dpi = 96;
+    uint32_t launchHeightPercent = 220;
+    uint32_t burstSizePercent = 170;
     uint64_t randomSeed = 0;
+    float launchDistancePx = 0.0f;
 };
 
 struct FireworkScene {
@@ -119,6 +122,8 @@ struct FireworkScene {
     std::wstring paletteName = L"GoldWhite";
     UINT dpi = 96;
     LaunchDirection direction = LaunchDirection::Up;
+    float launchHeightScale = 2.2f;
+    float burstScale = 1.7f;
     uint64_t randomSeed = 0;
     bool ignitionCreated = false;
     bool mainBurstCreated = false;

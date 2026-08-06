@@ -35,6 +35,10 @@ public:
     void PlayTestDot();
     void ToggleEnabled();
     bool IsEnabled() const noexcept;
+    uint32_t LaunchHeightPercent() const noexcept;
+    uint32_t BurstSizePercent() const noexcept;
+    void SetLaunchHeightPercent(uint32_t percent);
+    void SetBurstSizePercent(uint32_t percent);
     void OnTimer();
     bool IsTimerRunning() const noexcept;
     const FireworkDiagnostics& Diagnostics() const noexcept;

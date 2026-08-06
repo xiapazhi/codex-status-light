@@ -18,10 +18,16 @@
 #include <Shellapi.h>
 
 #include <chrono>
+#include <cstdint>
 #include <string>
+
+constexpr uint32_t kDefaultFireworkLaunchHeightPercent = 220;
+constexpr uint32_t kDefaultFireworkBurstSizePercent = 170;
 
 struct CelebrationSettings {
     bool fireworksEnabled = true;
+    uint32_t launchHeightPercent = kDefaultFireworkLaunchHeightPercent;
+    uint32_t burstSizePercent = kDefaultFireworkBurstSizePercent;
     bool respectReducedMotion = true;
     bool respectNotificationState = true;
     uint32_t cooldownMilliseconds = 5000;
