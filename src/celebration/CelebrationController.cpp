@@ -16,12 +16,16 @@
 
 #include <algorithm>
 #include <sstream>
+#include <utility>
+#include <vector>
 
 namespace {
 
 constexpr UINT_PTR kFireworkTimerId = 0x5346;
 constexpr UINT kFireworkFrameIntervalMs = 16;
 constexpr UINT kRetryDelaysMs[] = { 80, 160 };
+constexpr uint32_t kMaxFireworksPerBatch = 8;
+constexpr float kStartOffsetPattern[] = { 0.0f, -0.42f, 0.38f, -0.18f, 0.58f, -0.62f, 0.18f, 0.72f };
 
 std::wstring YesNo(bool value)
 {
@@ -51,6 +55,14 @@ float LaunchDistancePx(const TrayAnchor& anchor, uint32_t launchHeightPercent)
         static_cast<float>(launchHeightPercent) / 100.0f;
 }
 
+Vec2 StartOffset(LaunchDirection direction, UINT dpi, uint32_t index)
+{
+    const Vec2 lateral = LateralAxis(direction);
+    const float unit = static_cast<float>(ScalePx(10, dpi));
+    const float multiplier = kStartOffsetPattern[index % _countof(kStartOffsetPattern)];
+    return lateral * unit * multiplier;
+}
+
 } // namespace
 
 bool CelebrationController::Initialize(HINSTANCE instance, HWND mainWindow, UINT trayIconId)
@@ -74,16 +86,22 @@ void CelebrationController::Shutdown()
 
 void CelebrationController::OnAggregateTransition(const AggregateTransition& transition)
 {
-    if (!UpdatePendingForTransition(&pendingSuccessfulCompletion_, transition)) {
+    if (transition.newSuccessCount == 0) {
         return;
     }
-    const CelebrationDecision decision = policy_.Evaluate(settings_, lastPlayedAt_);
+
+    const CelebrationDecision decision = policy_.Evaluate(settings_, std::chrono::steady_clock::time_point());
     if (!decision.canPlay) {
         diagnostics_.suppressedCount++;
         diagnostics_.lastSuppressionReason = policy_.ReasonText(decision.reason);
         return;
     }
-    PlayTestDot();
+
+    const uint32_t playCount = std::min(transition.newSuccessCount, kMaxFireworksPerBatch);
+    retryIndex_ = 0;
+    if (!TryStartFirework(playCount)) {
+        ScheduleRetry(kRetryDelaysMs[retryIndex_ - 1]);
+    }
 }
 
 bool CelebrationController::UpdatePendingForTransition(
@@ -95,30 +113,17 @@ bool CelebrationController::UpdatePendingForTransition(
     }
 
     if (transition.newSuccessCount > 0) {
-        *pendingSuccessfulCompletion = true;
+        *pendingSuccessfulCompletion = false;
+        return true;
     }
 
-    const bool enteredCompleted =
-        transition.previousVisual != CelebrationVisualState::Completed &&
-        transition.currentVisual == CelebrationVisualState::Completed;
-    const bool observedFastSuccessAtRest =
-        transition.currentVisual == CelebrationVisualState::Completed &&
-        transition.newSuccessCount > 0 &&
-        transition.waitingCount == 0 &&
-        transition.runningCount == 0;
-
-    if ((!enteredCompleted && !observedFastSuccessAtRest) || !*pendingSuccessfulCompletion) {
-        return false;
-    }
-
-    *pendingSuccessfulCompletion = false;
-    return true;
+    return false;
 }
 
 void CelebrationController::PlayTestDot()
 {
     retryIndex_ = 0;
-    if (!TryStartTestDot()) {
+    if (!TryStartFirework(1)) {
         ScheduleRetry(kRetryDelaysMs[retryIndex_ - 1]);
     }
 }
@@ -159,29 +164,50 @@ void CelebrationController::SetBurstSizePercent(uint32_t percent)
 
 void CelebrationController::OnTimer()
 {
-    if (animator_.IsRunning() && activePlacement_.has_value()) {
-        animator_.Tick(std::chrono::steady_clock::now());
-        if (animator_.ConsumeExplosionStarted()) {
-            const FireworkAudioProfile audioProfile = animator_.Scene().audioProfile;
-            audioPlayer_.PlayExplosion(audioProfile);
-            diagnostics_.lastAudioProfile = AudioProfileText(audioProfile);
-            diagnostics_.lastAudioError = audioPlayer_.LastError();
-        }
-        renderer_.Render(animator_.Scene());
-        overlay_.Present(renderer_.Surface(), activePlacement_->screenPosition);
+    if (!activeFireworks_.empty() && activePlacement_.has_value()) {
+        const auto now = std::chrono::steady_clock::now();
+        std::vector<FireworkScene> scenes;
 
-        const uint32_t particleCount = static_cast<uint32_t>(animator_.Scene().particles.size());
-        if (particleCount > diagnostics_.lastParticlePeak) {
-            diagnostics_.lastParticlePeak = particleCount;
+        for (ActiveFirework& firework : activeFireworks_) {
+            firework.animator.Tick(now);
+            if (firework.animator.ConsumeExplosionStarted()) {
+                const FireworkAudioProfile audioProfile = firework.animator.Scene().audioProfile;
+                audioPlayer_.PlayExplosion(audioProfile);
+                diagnostics_.lastAudioProfile = AudioProfileText(audioProfile);
+                diagnostics_.lastAudioError = audioPlayer_.LastError();
+            }
+
+            if (firework.animator.IsRunning()) {
+                scenes.push_back(firework.animator.Scene());
+                const uint32_t particleCount = static_cast<uint32_t>(firework.animator.Scene().particles.size());
+                if (particleCount > diagnostics_.lastParticlePeak) {
+                    diagnostics_.lastParticlePeak = particleCount;
+                }
+            } else {
+                const uint32_t durationMs = static_cast<uint32_t>(GetTickCount64() - firework.startedTick);
+                if (durationMs > diagnostics_.lastAnimationDurationMs) {
+                    diagnostics_.lastAnimationDurationMs = durationMs;
+                }
+            }
         }
 
-        if (!animator_.IsRunning()) {
+        activeFireworks_.erase(
+            std::remove_if(activeFireworks_.begin(), activeFireworks_.end(), [](const ActiveFirework& firework) {
+                return !firework.animator.IsRunning();
+            }),
+            activeFireworks_.end());
+
+        if (scenes.empty()) {
             overlay_.Hide();
             diagnostics_.active = false;
-            diagnostics_.lastAnimationDurationMs = static_cast<uint32_t>(GetTickCount64() - animationStartedTick_);
             activePlacement_.reset();
             StopTimer();
+            return;
         }
+
+        renderer_.Render(scenes);
+        overlay_.Present(renderer_.Surface(), activePlacement_->screenPosition);
+        diagnostics_.active = true;
         return;
     }
 
@@ -245,6 +271,11 @@ std::wstring CelebrationController::BuildDiagnostics() const
 
 bool CelebrationController::TryStartTestDot()
 {
+    return TryStartFirework(1);
+}
+
+bool CelebrationController::TryStartFirework(uint32_t playCount)
+{
     TrayAnchorLocator locator(mainWindow_, trayIconId_);
     const std::optional<TrayAnchor> anchor = locator.Locate();
     diagnostics_.trayAnchorAvailable = anchor.has_value();
@@ -253,6 +284,7 @@ bool CelebrationController::TryStartTestDot()
         retryIndex_++;
         return false;
     }
+    const uint32_t clampedPlayCount = std::max<uint32_t>(1, std::min(playCount, kMaxFireworksPerBatch));
 
     FireworkLayoutSettings layout;
     layout.launchHeightPercent = settings_.launchHeightPercent;
@@ -262,6 +294,19 @@ bool CelebrationController::TryStartTestDot()
     diagnostics_.lastDpi = anchor->dpi;
     diagnostics_.overlayWidth = placement.width;
     diagnostics_.overlayHeight = placement.height;
+
+    if (activePlacement_.has_value()) {
+        const bool canShareOverlay =
+            activePlacement_->width == placement.width &&
+            activePlacement_->height == placement.height &&
+            activePlacement_->screenPosition.x == placement.screenPosition.x &&
+            activePlacement_->screenPosition.y == placement.screenPosition.y;
+        if (!canShareOverlay) {
+            activeFireworks_.clear();
+            activePlacement_.reset();
+            overlay_.Hide();
+        }
+    }
 
     if (!renderer_.Initialize(placement.width, placement.height)) {
         diagnostics_.suppressedCount++;
@@ -279,27 +324,51 @@ bool CelebrationController::TryStartTestDot()
         return true;
     }
 
-    FireworkPlayParameters parameters;
-    parameters.launchPointLocal = {
-        static_cast<float>(placement.launchPointLocal.x),
-        static_cast<float>(placement.launchPointLocal.y)
-    };
-    parameters.direction = placement.direction;
-    parameters.dpi = placement.dpi;
-    parameters.launchHeightPercent = settings_.launchHeightPercent;
-    parameters.burstSizePercent = settings_.burstSizePercent;
-    parameters.launchDistancePx = LaunchDistancePx(anchor.value(), settings_.launchHeightPercent);
-    animator_.Start(parameters);
-    renderer_.Render(animator_.Scene());
+    std::vector<FireworkScene> scenes;
+    for (const ActiveFirework& firework : activeFireworks_) {
+        if (firework.animator.IsRunning()) {
+            scenes.push_back(firework.animator.Scene());
+        }
+    }
+
+    for (uint32_t index = 0; index < clampedPlayCount; ++index) {
+        FireworkPlayParameters parameters;
+        const Vec2 launchPoint {
+            static_cast<float>(placement.launchPointLocal.x),
+            static_cast<float>(placement.launchPointLocal.y)
+        };
+        const Vec2 startOffset = StartOffset(placement.direction, placement.dpi, index);
+        parameters.launchPointLocal = {
+            launchPoint.x + startOffset.x,
+            launchPoint.y + startOffset.y
+        };
+        parameters.direction = placement.direction;
+        parameters.dpi = placement.dpi;
+        parameters.launchHeightPercent = settings_.launchHeightPercent;
+        parameters.burstSizePercent = settings_.burstSizePercent;
+        parameters.launchDistancePx = LaunchDistancePx(anchor.value(), settings_.launchHeightPercent);
+        parameters.overlayWidth = placement.width;
+        parameters.overlayHeight = placement.height;
+
+        ActiveFirework firework;
+        firework.animator.Start(parameters);
+        firework.startedTick = GetTickCount64();
+        scenes.push_back(firework.animator.Scene());
+        diagnostics_.lastParticlePeak = std::max(
+            diagnostics_.lastParticlePeak,
+            static_cast<uint32_t>(firework.animator.Scene().particles.size()));
+        diagnostics_.lastRandomSeed = firework.animator.Scene().randomSeed;
+        diagnostics_.lastPalette = firework.animator.Scene().paletteName;
+        activeFireworks_.push_back(std::move(firework));
+    }
+
+    renderer_.Render(scenes);
     overlay_.Present(renderer_.Surface(), placement.screenPosition);
 
     activePlacement_ = placement;
-    diagnostics_.playCount++;
+    diagnostics_.playCount += clampedPlayCount;
     diagnostics_.active = true;
-    diagnostics_.lastParticlePeak = static_cast<uint32_t>(animator_.Scene().particles.size());
-    diagnostics_.lastRandomSeed = animator_.Scene().randomSeed;
     diagnostics_.lastAnimationDurationMs = 0;
-    diagnostics_.lastPalette = animator_.Scene().paletteName;
     diagnostics_.lastSuppressionReason = L"None";
     lastPlayedAt_ = std::chrono::steady_clock::now();
     animationStartedTick_ = GetTickCount64();

@@ -113,6 +113,8 @@ struct FireworkPlayParameters {
     uint32_t burstSizePercent = 170;
     uint64_t randomSeed = 0;
     float launchDistancePx = 0.0f;
+    int overlayWidth = 0;
+    int overlayHeight = 0;
 };
 
 struct FireworkScene {
@@ -131,6 +133,8 @@ struct FireworkScene {
     float burstScale = 1.7f;
     uint64_t randomSeed = 0;
     FireworkAudioProfile audioProfile = FireworkAudioProfile::Impact005;
+    int overlayWidth = 0;
+    int overlayHeight = 0;
     bool ignitionCreated = false;
     bool mainBurstCreated = false;
 };

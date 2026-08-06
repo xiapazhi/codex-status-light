@@ -195,7 +195,7 @@ bool VerifyCelebrationTriggerRules()
         0,
         0,
         1);
-    ok = Expect(!CelebrationController::UpdatePendingForTransition(&pending, partialSuccess) && pending, "P7 partial success is delayed while running remains") && ok;
+    ok = Expect(CelebrationController::UpdatePendingForTransition(&pending, partialSuccess) && !pending, "P7 partial success triggers while running remains") && ok;
 
     AggregateTransition finalCompletion = MakeCelebrationTransition(
         CelebrationVisualState::Running,
@@ -205,7 +205,7 @@ bool VerifyCelebrationTriggerRules()
         0,
         0,
         0);
-    ok = Expect(CelebrationController::UpdatePendingForTransition(&pending, finalCompletion) && !pending, "P7 delayed success plays when aggregate completes") && ok;
+    ok = Expect(!CelebrationController::UpdatePendingForTransition(&pending, finalCompletion) && !pending, "P7 aggregate completion without new success does not retrigger") && ok;
 
     pending = false;
     AggregateTransition fastSuccess = MakeCelebrationTransition(

@@ -27,6 +27,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <vector>
 
 class CelebrationController {
 public:
@@ -47,7 +48,13 @@ public:
     static bool UpdatePendingForTransition(bool* pendingSuccessfulCompletion, const AggregateTransition& transition);
 
 private:
+    struct ActiveFirework {
+        FireworkAnimator animator;
+        ULONGLONG startedTick = 0;
+    };
+
     bool TryStartTestDot();
+    bool TryStartFirework(uint32_t playCount);
     void ScheduleRetry(UINT delayMs);
     void StopTimer();
     const wchar_t* DirectionText(LaunchDirection direction) const;
@@ -57,15 +64,14 @@ private:
     UINT trayIconId_ = 0;
     FireworkOverlayWindow overlay_;
     FireworkRenderer renderer_;
-    FireworkAnimator animator_;
     FireworkAudioPlayer audioPlayer_;
     CelebrationPolicy policy_;
     CelebrationSettings settings_;
     FireworkDiagnostics diagnostics_;
     std::chrono::steady_clock::time_point lastPlayedAt_;
     std::optional<FireworkOverlayPlacement> activePlacement_;
+    std::vector<ActiveFirework> activeFireworks_;
     ULONGLONG animationStartedTick_ = 0;
     UINT retryIndex_ = 0;
     bool timerRunning_ = false;
-    bool pendingSuccessfulCompletion_ = false;
 };

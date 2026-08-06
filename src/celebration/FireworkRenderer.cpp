@@ -107,6 +107,19 @@ bool FireworkRenderer::Resize(int width, int height)
 void FireworkRenderer::Render(const FireworkScene& scene)
 {
     Clear();
+    DrawScene(scene);
+}
+
+void FireworkRenderer::Render(const std::vector<FireworkScene>& scenes)
+{
+    Clear();
+    for (const FireworkScene& scene : scenes) {
+        DrawScene(scene);
+    }
+}
+
+void FireworkRenderer::DrawScene(const FireworkScene& scene)
+{
     DrawShockwave(scene.shockwave);
     for (const Particle& particle : scene.particles) {
         DrawParticle(particle);

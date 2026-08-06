@@ -19,7 +19,9 @@
 
 #include <Windows.h>
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 class FireworkAudioPlayer {
 public:
@@ -31,8 +33,11 @@ public:
 private:
     std::wstring AssetPath(FireworkAudioProfile profile) const;
     bool SendMciCommand(const std::wstring& command);
+    void TrimOpenAliases();
 
     std::wstring executableDirectory_;
     std::wstring lastError_;
+    std::vector<std::wstring> openAliases_;
+    uint32_t nextAliasId_ = 1;
     bool initialized_ = false;
 };

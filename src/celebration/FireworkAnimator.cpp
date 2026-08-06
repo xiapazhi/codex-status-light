@@ -39,6 +39,19 @@ float PercentToScale(uint32_t percent)
     return std::max(0.75f, std::min(2.6f, static_cast<float>(percent) / 100.0f));
 }
 
+float ClampTargetComponent(float value, int limit, float margin)
+{
+    if (limit <= 0) {
+        return value;
+    }
+
+    const float maxValue = static_cast<float>(limit) - margin;
+    if (maxValue <= margin) {
+        return static_cast<float>(limit) * 0.5f;
+    }
+    return std::max(margin, std::min(value, maxValue));
+}
+
 } // namespace
 
 void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
@@ -53,6 +66,8 @@ void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
     scene_.launchHeightScale = PercentToScale(parameters.launchHeightPercent);
     scene_.burstScale = PercentToScale(parameters.burstSizePercent);
     scene_.randomSeed = seed;
+    scene_.overlayWidth = parameters.overlayWidth;
+    scene_.overlayHeight = parameters.overlayHeight;
     scene_.palette = PickPalette();
     scene_.audioProfile = PickAudioProfile();
     scene_.particles.reserve(kMaxParticles);
@@ -62,13 +77,21 @@ void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
     const Vec2 axis = LaunchAxis(parameters.direction);
     const Vec2 lateral = LateralAxis(parameters.direction);
     const float scaledBurstDistance = static_cast<float>(ScalePx(72, parameters.dpi)) * scene_.launchHeightScale;
-    const float burstDistance = parameters.launchDistancePx > 0.0f ? parameters.launchDistancePx : scaledBurstDistance;
-    const float driftRange = static_cast<float>(ScalePx(8, parameters.dpi)) * scene_.burstScale;
-    const float targetJitterRange = static_cast<float>(ScalePx(10, parameters.dpi)) * scene_.burstScale;
+    const float baseBurstDistance = parameters.launchDistancePx > 0.0f ? parameters.launchDistancePx : scaledBurstDistance;
+    const float heightVariation = random_.Range(0.90f, 1.10f);
+    const float burstDistance = baseBurstDistance * heightVariation;
+    const float driftRange = static_cast<float>(ScalePx(14, parameters.dpi)) * scene_.burstScale;
+    const float targetJitterRange = static_cast<float>(ScalePx(24, parameters.dpi)) * scene_.burstScale;
     const float drift = random_.Range(-driftRange, driftRange);
+    const float targetJitter = random_.Range(-targetJitterRange, targetJitterRange);
+
+    const float burstMargin = static_cast<float>(ScalePx(58, parameters.dpi)) * scene_.burstScale;
+    Vec2 target = parameters.launchPointLocal + axis * burstDistance + lateral * targetJitter;
+    target.x = ClampTargetComponent(target.x, parameters.overlayWidth, burstMargin);
+    target.y = ClampTargetComponent(target.y, parameters.overlayHeight, burstMargin);
 
     scene_.rocket.start = parameters.launchPointLocal;
-    scene_.rocket.target = parameters.launchPointLocal + axis * burstDistance + lateral * random_.Range(-targetJitterRange, targetJitterRange);
+    scene_.rocket.target = target;
     scene_.rocket.position = scene_.rocket.start;
     scene_.rocket.previousPosition = scene_.rocket.start;
     scene_.rocket.lateralAxis = lateral;
@@ -166,7 +189,11 @@ void FireworkAnimator::CreateMainBurst()
         return;
     }
 
-    const Vec2 origin = scene_.rocket.position;
+    const float burstMargin = static_cast<float>(ScalePx(58, scene_.dpi)) * scene_.burstScale;
+    Vec2 origin = scene_.rocket.position;
+    origin.x = ClampTargetComponent(origin.x, scene_.overlayWidth, burstMargin);
+    origin.y = ClampTargetComponent(origin.y, scene_.overlayHeight, burstMargin);
+    scene_.rocket.position = origin;
     const float burstScale = scene_.burstScale;
     const bool crackleProfile = scene_.audioProfile == FireworkAudioProfile::Crackle002;
     scene_.flashCore.position = origin;

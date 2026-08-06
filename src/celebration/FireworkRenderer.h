@@ -17,6 +17,8 @@
 #include "FireworkScene.h"
 #include "FireworkTypes.h"
 
+#include <vector>
+
 class FireworkRenderer {
 public:
     FireworkRenderer();
@@ -25,12 +27,14 @@ public:
     bool Initialize(int width, int height);
     bool Resize(int width, int height);
     void Render(const FireworkScene& scene);
+    void Render(const std::vector<FireworkScene>& scenes);
     void RenderTestDot(const FireworkOverlayPlacement& placement);
     const DibSurface& Surface() const noexcept;
 
 private:
     void ReleaseSurface();
     void Clear();
+    void DrawScene(const FireworkScene& scene);
     void DrawRocket(const Rocket& rocket);
     void DrawParticle(const Particle& particle);
     void DrawFlashCore(const FlashCore& core);

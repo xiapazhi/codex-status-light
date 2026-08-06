@@ -22,6 +22,7 @@ namespace {
 const wchar_t* kAudioAlias = L"StatusLightFireworkExplosion";
 const wchar_t* kImpactAudioFile = L"firework_explosion_fizz_005.mp3";
 const wchar_t* kCrackleAudioFile = L"firework_explosion_fizz_002.mp3";
+constexpr size_t kMaxOpenAliases = 12;
 
 std::wstring MciErrorText(MCIERROR error)
 {
@@ -71,19 +72,24 @@ void FireworkAudioPlayer::PlayExplosion(FireworkAudioProfile profile)
         return;
     }
 
-    SendMciCommand(L"close " + std::wstring(kAudioAlias));
+    TrimOpenAliases();
+    const std::wstring alias = std::wstring(kAudioAlias) + std::to_wstring(nextAliasId_++);
     const std::wstring openCommand =
-        L"open \"" + audioPath + L"\" type mpegvideo alias " + std::wstring(kAudioAlias);
+        L"open \"" + audioPath + L"\" type mpegvideo alias " + alias;
     if (!SendMciCommand(openCommand)) {
         return;
     }
 
-    SendMciCommand(L"play " + std::wstring(kAudioAlias));
+    openAliases_.push_back(alias);
+    SendMciCommand(L"play " + alias);
 }
 
 void FireworkAudioPlayer::Shutdown()
 {
-    SendMciCommand(L"close " + std::wstring(kAudioAlias));
+    for (const std::wstring& alias : openAliases_) {
+        SendMciCommand(L"close " + alias);
+    }
+    openAliases_.clear();
 }
 
 std::wstring FireworkAudioPlayer::LastError() const
@@ -109,4 +115,12 @@ bool FireworkAudioPlayer::SendMciCommand(const std::wstring& command)
 
     lastError_ = MciErrorText(error);
     return false;
+}
+
+void FireworkAudioPlayer::TrimOpenAliases()
+{
+    while (openAliases_.size() >= kMaxOpenAliases) {
+        SendMciCommand(L"close " + openAliases_.front());
+        openAliases_.erase(openAliases_.begin());
+    }
 }
