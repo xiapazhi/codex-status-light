@@ -34,6 +34,8 @@ bool CelebrationController::Initialize(HINSTANCE instance, HWND mainWindow, UINT
     instance_ = instance;
     mainWindow_ = mainWindow;
     trayIconId_ = trayIconId;
+    settings_ = policy_.LoadSettings();
+    diagnostics_.enabled = settings_.fireworksEnabled;
     return overlay_.Initialize(instance_, &diagnostics_);
 }
 
@@ -63,6 +65,12 @@ void CelebrationController::OnAggregateTransition(const AggregateTransition& tra
     }
 
     pendingSuccessfulCompletion_ = false;
+    const CelebrationDecision decision = policy_.Evaluate(settings_, lastPlayedAt_);
+    if (!decision.canPlay) {
+        diagnostics_.suppressedCount++;
+        diagnostics_.lastSuppressionReason = policy_.ReasonText(decision.reason);
+        return;
+    }
     PlayTestDot();
 }
 
@@ -72,6 +80,18 @@ void CelebrationController::PlayTestDot()
     if (!TryStartTestDot()) {
         ScheduleRetry(kRetryDelaysMs[retryIndex_ - 1]);
     }
+}
+
+void CelebrationController::ToggleEnabled()
+{
+    settings_.fireworksEnabled = !settings_.fireworksEnabled;
+    diagnostics_.enabled = settings_.fireworksEnabled;
+    policy_.SaveSettings(settings_);
+}
+
+bool CelebrationController::IsEnabled() const noexcept
+{
+    return settings_.fireworksEnabled;
 }
 
 void CelebrationController::OnTimer()
@@ -125,11 +145,12 @@ const FireworkDiagnostics& CelebrationController::Diagnostics() const noexcept
 std::wstring CelebrationController::BuildDiagnostics() const
 {
     std::wostringstream output;
+    const CelebrationDecision environment = policy_.Evaluate(settings_, lastPlayedAt_);
     output << L"Celebration enabled: " << YesNo(diagnostics_.enabled) << L"\n";
     output << L"Celebration active: " << YesNo(diagnostics_.active) << L"\n";
-    output << L"Celebration cooldown: 0ms\n";
-    output << L"Animations allowed: yes\n";
-    output << L"Notification state: not_checked_p0\n";
+    output << L"Celebration cooldown: " << settings_.cooldownMilliseconds << L"ms\n";
+    output << L"Animations allowed: " << YesNo(environment.animationsAllowed) << L"\n";
+    output << L"Notification state: " << environment.notificationState << L"\n";
     output << L"Tray anchor available: " << YesNo(diagnostics_.trayAnchorAvailable) << L"\n";
     output << L"Launch direction: " << DirectionText(diagnostics_.lastLaunchDirection) << L"\n";
     output << L"Overlay size: " << diagnostics_.overlayWidth << L"x" << diagnostics_.overlayHeight << L"\n";
@@ -201,6 +222,7 @@ bool CelebrationController::TryStartTestDot()
     diagnostics_.lastAnimationDurationMs = 0;
     diagnostics_.lastPalette = animator_.Scene().paletteName;
     diagnostics_.lastSuppressionReason = L"None";
+    lastPlayedAt_ = std::chrono::steady_clock::now();
     animationStartedTick_ = GetTickCount64();
     retryIndex_ = 0;
     if (!timerRunning_) {

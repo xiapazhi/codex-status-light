@@ -17,6 +17,7 @@
 #include "FireworkDiagnostics.h"
 #include "FireworkAnimator.h"
 #include "FireworkOverlayWindow.h"
+#include "CelebrationPolicy.h"
 #include "FireworkRenderer.h"
 #include "TrayAnchorLocator.h"
 
@@ -32,6 +33,8 @@ public:
     void Shutdown();
     void OnAggregateTransition(const AggregateTransition& transition);
     void PlayTestDot();
+    void ToggleEnabled();
+    bool IsEnabled() const noexcept;
     void OnTimer();
     bool IsTimerRunning() const noexcept;
     const FireworkDiagnostics& Diagnostics() const noexcept;
@@ -49,7 +52,10 @@ private:
     FireworkOverlayWindow overlay_;
     FireworkRenderer renderer_;
     FireworkAnimator animator_;
+    CelebrationPolicy policy_;
+    CelebrationSettings settings_;
     FireworkDiagnostics diagnostics_;
+    std::chrono::steady_clock::time_point lastPlayedAt_;
     std::optional<FireworkOverlayPlacement> activePlacement_;
     ULONGLONG animationStartedTick_ = 0;
     UINT retryIndex_ = 0;

@@ -131,6 +131,7 @@ private:
 
     TrayOptions options_;
     HWND hwnd_ = nullptr;
+    UINT taskbarCreatedMessage_ = 0;
     NOTIFYICONDATAW notifyData_ {};
     StatusReader reader_;
     StatusSnapshot snapshot_;

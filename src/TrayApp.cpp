@@ -36,6 +36,7 @@ constexpr UINT kMenuCopyDiagnostics = 2003;
 constexpr UINT kMenuExit = 2004;
 constexpr UINT kMenuToggleWebBridge = 2005;
 constexpr UINT kMenuTestFirework = 2006;
+constexpr UINT kMenuToggleFireworks = 2007;
 constexpr ULONGLONG kCalibrationIntervalMs = 5000;
 constexpr ULONGLONG kStartupNoCodexGraceMs = 15000;
 constexpr ULONGLONG kRuntimeNoCodexGraceMs = 5000;
@@ -153,6 +154,12 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 
+    if (message == app->taskbarCreatedMessage_) {
+        app->AddTrayIcon();
+        app->UpdateTrayIcon();
+        return 0;
+    }
+
     switch (message) {
     case WM_TIMER:
         if (wParam == kFireworkTimerId) {
@@ -194,6 +201,9 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         case kMenuTestFirework:
             app->celebrationController_.PlayTestDot();
             return 0;
+        case kMenuToggleFireworks:
+            app->celebrationController_.ToggleEnabled();
+            return 0;
         case kMenuToggleWebBridge:
             if (app->webMonitor_.IsEnabled()) {
                 app->webMonitor_.Disable();
@@ -227,6 +237,7 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
 bool TrayApp::CreateHiddenWindow(HINSTANCE instance)
 {
     const wchar_t* className = L"CodexStatusLightTrayWindow";
+    taskbarCreatedMessage_ = RegisterWindowMessageW(L"TaskbarCreated");
 
     WNDCLASSEXW windowClass {};
     windowClass.cbSize = sizeof(windowClass);
@@ -416,6 +427,15 @@ void TrayApp::ShowContextMenu()
         MF_STRING,
         kMenuToggleWebBridge,
         webMonitor_.IsEnabled() ? L"停用网页桥接" : L"启用网页桥接");
+    HMENU fireworksMenu = CreatePopupMenu();
+    if (fireworksMenu != nullptr) {
+        AppendMenuW(
+            fireworksMenu,
+            MF_STRING | (celebrationController_.IsEnabled() ? MF_CHECKED : MF_UNCHECKED),
+            kMenuToggleFireworks,
+            L"启用");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fireworksMenu), L"完成烟花效果");
+    }
     AppendMenuW(menu, MF_STRING, kMenuTestFirework, L"测试完成烟花");
     AppendMenuW(menu, MF_STRING, kMenuClearCompleted, L"清除完成提示");
     AppendMenuW(menu, MF_STRING, kMenuCopyDiagnostics, L"复制诊断信息");

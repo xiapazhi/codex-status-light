@@ -38,6 +38,7 @@ add_executable(StatusLight
     src/IconRenderer.cpp
     src/TrayApp.cpp
     src/celebration/CelebrationController.cpp
+    src/celebration/CelebrationPolicy.cpp
     src/celebration/FireworkAnimator.cpp
     src/celebration/FireworkOverlayWindow.cpp
     src/celebration/FireworkRenderer.cpp
