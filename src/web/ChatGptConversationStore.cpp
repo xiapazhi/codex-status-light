@@ -221,6 +221,7 @@ void ChatGptConversationStore::MigrateConversationIfNeeded(const PageObserverRec
             existingConversation.state = migrated.state;
             existingConversation.operationGeneration = migrated.operationGeneration;
             existingConversation.operationActive = migrated.operationActive;
+            existingConversation.operationSawRunning = migrated.operationSawRunning;
             existingConversation.activeOwnerObserverId = migrated.activeOwnerObserverId;
             existingConversation.activeOwnerBrowserInstanceId = migrated.activeOwnerBrowserInstanceId;
             existingConversation.activeOwnerTabId = migrated.activeOwnerTabId;
@@ -260,8 +261,10 @@ void ChatGptConversationStore::ApplyConversationState(const PageObserverRecord& 
         if (!conversation->operationActive) {
             conversation->operationGeneration++;
             conversation->operationActive = true;
+            conversation->operationSawRunning = false;
             conversation->activeOwnerObserverId = observer.observerId;
         }
+        conversation->operationSawRunning = true;
         SetConversationState(conversation, WebConversationState::Running, observer.lastObservedAt, observer.reason);
         return;
     }
@@ -270,6 +273,7 @@ void ChatGptConversationStore::ApplyConversationState(const PageObserverRecord& 
         if (!conversation->operationActive) {
             conversation->operationGeneration++;
             conversation->operationActive = true;
+            conversation->operationSawRunning = false;
             conversation->activeOwnerObserverId = observer.observerId;
         }
         SetConversationState(conversation, WebConversationState::WaitingInput, observer.lastObservedAt, observer.reason);
@@ -280,12 +284,20 @@ void ChatGptConversationStore::ApplyConversationState(const PageObserverRecord& 
         if (!conversation->operationActive) {
             return;
         }
+        if (!conversation->operationSawRunning) {
+            conversation->operationActive = false;
+            conversation->operationSawRunning = false;
+            conversation->terminalReason.reset();
+            SetConversationState(conversation, WebConversationState::Idle, observer.lastObservedAt, "terminal-without-running");
+            return;
+        }
         TerminalEventKey key { conversation->conversationKey, conversation->operationGeneration };
         if (handledTerminalEvents_.find(key) != handledTerminalEvents_.end()) {
             return;
         }
         handledTerminalEvents_.insert(key);
         conversation->operationActive = false;
+        conversation->operationSawRunning = false;
         conversation->terminalReason = TerminalReason { ShortReason(observer.reason) };
         SetConversationState(conversation, nextState, observer.lastObservedAt, observer.reason);
         return;
@@ -295,10 +307,18 @@ void ChatGptConversationStore::ApplyConversationState(const PageObserverRecord& 
         const int64_t observedAt = observer.lastObservedAt != 0 ? observer.lastObservedAt : CurrentTimeMs();
         const bool stableEnough = observedAt - conversation->stateChangedAt >= 2000;
         if (stableEnough) {
+            if (!conversation->operationSawRunning) {
+                conversation->operationActive = false;
+                conversation->operationSawRunning = false;
+                conversation->terminalReason.reset();
+                SetConversationState(conversation, WebConversationState::Idle, observedAt, "idle-without-running");
+                return;
+            }
             TerminalEventKey key { conversation->conversationKey, conversation->operationGeneration };
             if (handledTerminalEvents_.find(key) == handledTerminalEvents_.end()) {
                 handledTerminalEvents_.insert(key);
                 conversation->operationActive = false;
+                conversation->operationSawRunning = false;
                 conversation->terminalReason = TerminalReason { "stable-idle-after-active" };
                 SetConversationState(conversation, WebConversationState::TerminalSuccess, observedAt, "stable-idle-after-active");
             }
@@ -324,6 +344,7 @@ void ChatGptConversationStore::ClearActiveContributionIfNoHealthyObserver(WebCon
 
     if (!hasHealthyObserver && IsActiveState(conversation->state)) {
         conversation->operationActive = false;
+        conversation->operationSawRunning = false;
         conversation->terminalReason.reset();
         SetConversationState(conversation, WebConversationState::Idle, observedAt, "observer-unavailable");
     }

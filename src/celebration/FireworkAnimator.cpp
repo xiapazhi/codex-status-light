@@ -23,7 +23,7 @@ namespace {
 
 constexpr float kIgnitionSeconds = 0.08f;
 constexpr float kLaunchSeconds = 1.40f;
-constexpr float kLargeFrameCutoffSeconds = 0.5f;
+constexpr float kLongPauseCutoffSeconds = 2.0f;
 constexpr float kMaximumFrameSeconds = 0.05f;
 constexpr float kTwoPi = 6.28318530717958647692f;
 constexpr size_t kMaxParticles = 128;
@@ -117,7 +117,7 @@ void FireworkAnimator::Tick(std::chrono::steady_clock::time_point now)
 
     float dt = std::chrono::duration<float>(now - previousTick_).count();
     previousTick_ = now;
-    if (dt >= kLargeFrameCutoffSeconds) {
+    if (dt >= kLongPauseCutoffSeconds) {
         Stop();
         return;
     }

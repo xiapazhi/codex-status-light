@@ -23,6 +23,7 @@ const wchar_t* kAudioAlias = L"StatusLightFireworkExplosion";
 const wchar_t* kImpactAudioFile = L"firework_explosion_fizz_005.mp3";
 const wchar_t* kCrackleAudioFile = L"firework_explosion_fizz_002.mp3";
 constexpr size_t kMaxOpenAliases = 12;
+constexpr size_t kMaxPendingProfiles = 16;
 
 std::wstring MciErrorText(MCIERROR error)
 {
@@ -37,6 +38,11 @@ std::wstring MciErrorText(MCIERROR error)
 
 bool FireworkAudioPlayer::Initialize()
 {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (initialized_) {
+        return true;
+    }
+
     wchar_t modulePath[MAX_PATH] {};
     const DWORD length = GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(_countof(modulePath)));
     if (length == 0 || length >= _countof(modulePath)) {
@@ -55,7 +61,9 @@ bool FireworkAudioPlayer::Initialize()
 
     executableDirectory_.resize(slash);
     initialized_ = true;
+    shuttingDown_ = false;
     lastError_ = L"None";
+    worker_ = std::thread(&FireworkAudioPlayer::WorkerLoop, this);
     return true;
 }
 
@@ -65,10 +73,44 @@ void FireworkAudioPlayer::PlayExplosion(FireworkAudioProfile profile)
         return;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (pendingProfiles_.size() >= kMaxPendingProfiles) {
+            pendingProfiles_.pop_front();
+        }
+        pendingProfiles_.push_back(profile);
+    }
+    wakeWorker_.notify_one();
+}
+
+void FireworkAudioPlayer::WorkerLoop()
+{
+    for (;;) {
+        FireworkAudioProfile profile = FireworkAudioProfile::Impact005;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            wakeWorker_.wait(lock, [this]() {
+                return shuttingDown_ || !pendingProfiles_.empty();
+            });
+
+            if (shuttingDown_ && pendingProfiles_.empty()) {
+                break;
+            }
+
+            profile = pendingProfiles_.front();
+            pendingProfiles_.pop_front();
+        }
+
+        PlayExplosionOnWorker(profile);
+    }
+}
+
+void FireworkAudioPlayer::PlayExplosionOnWorker(FireworkAudioProfile profile)
+{
     const std::wstring audioPath = AssetPath(profile);
     const DWORD attributes = GetFileAttributesW(audioPath.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        lastError_ = L"AudioAssetMissing";
+        SetLastError(L"AudioAssetMissing");
         return;
     }
 
@@ -86,14 +128,26 @@ void FireworkAudioPlayer::PlayExplosion(FireworkAudioProfile profile)
 
 void FireworkAudioPlayer::Shutdown()
 {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shuttingDown_ = true;
+        pendingProfiles_.clear();
+    }
+    wakeWorker_.notify_one();
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+
     for (const std::wstring& alias : openAliases_) {
         SendMciCommand(L"close " + alias);
     }
     openAliases_.clear();
+    initialized_ = false;
 }
 
 std::wstring FireworkAudioPlayer::LastError() const
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     return lastError_;
 }
 
@@ -109,12 +163,18 @@ bool FireworkAudioPlayer::SendMciCommand(const std::wstring& command)
 {
     const MCIERROR error = mciSendStringW(command.c_str(), nullptr, 0, nullptr);
     if (error == 0) {
-        lastError_ = L"None";
+        SetLastError(L"None");
         return true;
     }
 
-    lastError_ = MciErrorText(error);
+    SetLastError(MciErrorText(error));
     return false;
+}
+
+void FireworkAudioPlayer::SetLastError(const std::wstring& error)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    lastError_ = error;
 }
 
 void FireworkAudioPlayer::TrimOpenAliases()

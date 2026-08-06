@@ -295,6 +295,20 @@ int WebSelfTest::Run()
         state.completedCount == 1 && state.runningCount == 0 && state.waitingCount == 0,
         "P3 cancelled terminal state counts as completed only") && ok;
 
+    ChatGptConversationStore editStore;
+    const std::string editKey = editStore.BuildConversationKey(browserInstanceId, conversationOne, 1, "doc-edit");
+    editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::WaitingInput, 1000, "explicit-gate"));
+    editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::Idle, 3200, "edit-idle-before-send"));
+    state = aggregator.Aggregate(editStore.Conversations(), 1, 1, editStore.ObserverCount(), 0, WebMonitorHealth::Normal);
+    ok = Expect(
+        state.completedCount == 0 && state.runningCount == 0 && state.waitingCount == 0,
+        "P7 edit-only idle does not create successful completion") && ok;
+
+    editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::Running, 4000, "visible-stop-control"));
+    editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::Idle, 6300, "stable-idle-after-active"));
+    state = aggregator.Aggregate(editStore.Conversations(), 1, 1, editStore.ObserverCount(), 0, WebMonitorHealth::Normal);
+    ok = Expect(state.completedCount == 1, "P7 running then idle creates successful completion") && ok;
+
     std::cout << "P0 self-check: Native Messaging data model and bridge aggregation compiled\n";
     std::cout << "P1 self-check: extension observer identity model compiled\n";
     std::cout << "P3 self-check: state classification invariants verified\n";

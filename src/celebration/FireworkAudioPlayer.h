@@ -19,8 +19,12 @@
 
 #include <Windows.h>
 
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 class FireworkAudioPlayer {
@@ -32,12 +36,20 @@ public:
 
 private:
     std::wstring AssetPath(FireworkAudioProfile profile) const;
+    void WorkerLoop();
+    void PlayExplosionOnWorker(FireworkAudioProfile profile);
     bool SendMciCommand(const std::wstring& command);
+    void SetLastError(const std::wstring& error);
     void TrimOpenAliases();
 
     std::wstring executableDirectory_;
     std::wstring lastError_;
     std::vector<std::wstring> openAliases_;
+    std::deque<FireworkAudioProfile> pendingProfiles_;
+    std::thread worker_;
+    mutable std::mutex mutex_;
+    std::condition_variable wakeWorker_;
     uint32_t nextAliasId_ = 1;
     bool initialized_ = false;
+    bool shuttingDown_ = false;
 };

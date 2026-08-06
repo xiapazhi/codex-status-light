@@ -86,6 +86,7 @@ struct WebConversationRecord {
     WebConversationState state = WebConversationState::Unknown;
     uint64_t operationGeneration = 0;
     bool operationActive = false;
+    bool operationSawRunning = false;
     int64_t stateChangedAt = 0;
     int64_t lastObservedAt = 0;
     std::optional<TerminalReason> terminalReason;

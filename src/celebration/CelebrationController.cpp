@@ -167,14 +167,14 @@ void CelebrationController::OnTimer()
     if (!activeFireworks_.empty() && activePlacement_.has_value()) {
         const auto now = std::chrono::steady_clock::now();
         std::vector<FireworkScene> scenes;
+        std::vector<FireworkAudioProfile> pendingAudioProfiles;
 
         for (ActiveFirework& firework : activeFireworks_) {
             firework.animator.Tick(now);
             if (firework.animator.ConsumeExplosionStarted()) {
                 const FireworkAudioProfile audioProfile = firework.animator.Scene().audioProfile;
-                audioPlayer_.PlayExplosion(audioProfile);
                 diagnostics_.lastAudioProfile = AudioProfileText(audioProfile);
-                diagnostics_.lastAudioError = audioPlayer_.LastError();
+                pendingAudioProfiles.push_back(audioProfile);
             }
 
             if (firework.animator.IsRunning()) {
@@ -207,6 +207,10 @@ void CelebrationController::OnTimer()
 
         renderer_.Render(scenes);
         overlay_.Present(renderer_.Surface(), activePlacement_->screenPosition);
+        for (FireworkAudioProfile audioProfile : pendingAudioProfiles) {
+            audioPlayer_.PlayExplosion(audioProfile);
+            diagnostics_.lastAudioError = audioPlayer_.LastError();
+        }
         diagnostics_.active = true;
         return;
     }
