@@ -62,6 +62,22 @@ Implemented effects:
 
 ## Web Companion
 
+Location:
+
+```text
+extension\
+```
+
+Role:
+
+- Runs only on ChatGPT pages.
+- Detects page state: idle, running, waiting, terminal success, failure, or cancellation.
+- Sends state snapshots to `StatusLight.exe` through Chrome Native Messaging.
+- Receives focus commands from `StatusLight.exe` and activates the related Chrome tab.
+- Provides a small popup for bridge status, reconnect, and extension diagnostics.
+
+Use it when ChatGPT Web tasks should appear in the same tray indicator as local Codex tasks. It is not required for local Codex monitoring.
+
 ```text
 Content Script
   -> Service Worker
@@ -121,6 +137,7 @@ dist\StatusLight.exe --self-test-web
 3. Load `extension\` as an unpacked Chrome extension.
 4. Confirm extension ID `pkaefmgibeeemjoilbpopeiffmkbnjoi`.
 5. Open ChatGPT pages normally.
+6. Use the extension popup only for bridge status and manual reconnect.
 
 ## Build
 

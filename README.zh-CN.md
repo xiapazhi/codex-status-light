@@ -62,6 +62,22 @@ flowchart LR
 
 ## 网页监听
 
+位置：
+
+```text
+extension\
+```
+
+作用：
+
+- 只在 ChatGPT 页面运行。
+- 识别页面状态：空闲、运行、等待、成功、失败、取消。
+- 通过 Chrome Native Messaging 把状态快照发送给 `StatusLight.exe`。
+- 接收 `StatusLight.exe` 的聚焦命令，并激活对应 Chrome 标签页。
+- 提供扩展弹窗，用于查看桥接状态、手动重连和诊断。
+
+需要把 ChatGPT 网页端任务合并到同一个托盘状态灯时才需要安装该扩展。本地 Codex 监听不依赖扩展。
+
 ```text
 Content Script
   -> Service Worker
@@ -121,6 +137,7 @@ dist\StatusLight.exe --self-test-web
 3. 在 Chrome 加载 `extension\` 解压扩展。
 4. 确认扩展 ID 为 `pkaefmgibeeemjoilbpopeiffmkbnjoi`。
 5. 正常打开 ChatGPT 页面。
+6. 扩展弹窗只用于查看桥接状态和手动重连。
 
 ## 构建
 
