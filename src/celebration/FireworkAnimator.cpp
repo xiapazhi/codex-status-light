@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace {
 
@@ -23,6 +24,7 @@ constexpr float kIgnitionSeconds = 0.07f;
 constexpr float kLaunchSeconds = 0.32f;
 constexpr float kLargeFrameCutoffSeconds = 0.5f;
 constexpr float kMaximumFrameSeconds = 0.05f;
+constexpr float kTwoPi = 6.28318530717958647692f;
 
 uint64_t SeedFromClock()
 {
@@ -42,6 +44,7 @@ void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
     scene_.dpi = parameters.dpi;
     scene_.direction = parameters.direction;
     scene_.randomSeed = seed;
+    scene_.palette = PickPalette();
     scene_.particles.reserve(96);
 
     const Vec2 axis = LaunchAxis(parameters.direction);
@@ -89,6 +92,8 @@ void FireworkAnimator::Tick(std::chrono::steady_clock::time_point now)
         UpdateIgnition(dt);
     } else if (scene_.stage == FireworkStage::Launch) {
         UpdateLaunch(dt);
+    } else if (scene_.stage == FireworkStage::MainBurst || scene_.stage == FireworkStage::Afterglow) {
+        UpdateBurst(dt);
     }
 
     UpdateParticles(dt);
@@ -129,6 +134,52 @@ void FireworkAnimator::UpdateLaunch(float dt)
     const bool launchFinished = scene_.rocket.ageSeconds >= scene_.rocket.durationSeconds;
     if (launchFinished) {
         scene_.rocket.exploded = true;
+        CreateMainBurst();
+        scene_.stage = FireworkStage::MainBurst;
+    }
+}
+
+void FireworkAnimator::CreateMainBurst()
+{
+    if (scene_.mainBurstCreated) {
+        return;
+    }
+
+    const Vec2 origin = scene_.rocket.position;
+    scene_.flashCore.position = origin;
+    scene_.flashCore.color = scene_.palette.core;
+    scene_.flashCore.startRadius = static_cast<float>(ScalePx(18, scene_.dpi));
+    scene_.flashCore.active = true;
+
+    scene_.shockwave.position = origin;
+    scene_.shockwave.color = scene_.palette.primary;
+    scene_.shockwave.startRadius = static_cast<float>(ScalePx(6, scene_.dpi));
+    scene_.shockwave.endRadius = static_cast<float>(ScalePx(42, scene_.dpi));
+    scene_.shockwave.active = true;
+
+    AddBurstSparkParticles(origin);
+    AddMeteorSparkParticles(origin);
+    AddFineSparkParticles(origin);
+    scene_.mainBurstCreated = true;
+}
+
+void FireworkAnimator::UpdateBurst(float dt)
+{
+    if (scene_.flashCore.active) {
+        scene_.flashCore.ageSeconds += dt;
+        if (scene_.flashCore.ageSeconds >= scene_.flashCore.durationSeconds) {
+            scene_.flashCore.active = false;
+        }
+    }
+
+    if (scene_.shockwave.active) {
+        scene_.shockwave.ageSeconds += dt;
+        if (scene_.shockwave.ageSeconds >= scene_.shockwave.durationSeconds) {
+            scene_.shockwave.active = false;
+        }
+    }
+
+    if (!scene_.flashCore.active && !scene_.shockwave.active) {
         scene_.stage = FireworkStage::Afterglow;
     }
 }
@@ -179,6 +230,43 @@ void FireworkAnimator::AddRocketTrailParticles()
     }
 }
 
+void FireworkAnimator::AddBurstSparkParticles(const Vec2& origin)
+{
+    const int sparkCount = random_.RangeInt(26, 32);
+    for (int index = 0; index < sparkCount && scene_.particles.size() < 96; ++index) {
+        const float baseAngle = kTwoPi * static_cast<float>(index) / static_cast<float>(sparkCount);
+        const float angle = baseAngle + random_.Range(-0.08f, 0.08f);
+        const float speed = random_.Range(58.0f, 92.0f);
+        const ColorF color = index % 3 == 0 ? scene_.palette.secondary : scene_.palette.primary;
+        scene_.particles.push_back(MakeBurstParticle(origin, ParticleKind::BurstSpark, angle, speed, color));
+    }
+}
+
+void FireworkAnimator::AddMeteorSparkParticles(const Vec2& origin)
+{
+    const int meteorCount = random_.RangeInt(6, 8);
+    for (int index = 0; index < meteorCount && scene_.particles.size() < 96; ++index) {
+        const float angle = kTwoPi * static_cast<float>(index) / static_cast<float>(meteorCount) + random_.Range(-0.18f, 0.18f);
+        Particle particle = MakeBurstParticle(origin, ParticleKind::MeteorSpark, angle, random_.Range(96.0f, 128.0f), scene_.palette.accent);
+        particle.drawTrail = true;
+        particle.startRadius = random_.Range(1.7f, 2.3f);
+        particle.lifetimeSeconds = random_.Range(0.48f, 0.72f);
+        scene_.particles.push_back(particle);
+    }
+}
+
+void FireworkAnimator::AddFineSparkParticles(const Vec2& origin)
+{
+    const int fineSparkCount = random_.RangeInt(8, 12);
+    for (int index = 0; index < fineSparkCount && scene_.particles.size() < 96; ++index) {
+        const float angle = random_.Range(0.0f, kTwoPi);
+        Particle particle = MakeBurstParticle(origin, ParticleKind::BurstSpark, angle, random_.Range(35.0f, 62.0f), scene_.palette.secondary);
+        particle.startRadius = random_.Range(0.7f, 1.2f);
+        particle.lifetimeSeconds = random_.Range(0.28f, 0.45f);
+        scene_.particles.push_back(particle);
+    }
+}
+
 Particle FireworkAnimator::MakeRocketTrail()
 {
     const Vec2 axis = LaunchAxis(scene_.direction);
@@ -200,6 +288,28 @@ Particle FireworkAnimator::MakeRocketTrail()
     return particle;
 }
 
+Particle FireworkAnimator::MakeBurstParticle(const Vec2& origin, ParticleKind kind, float angle, float speed, const ColorF& color)
+{
+    const Vec2 direction {
+        std::cos(angle),
+        std::sin(angle)
+    };
+
+    Particle particle;
+    particle.kind = kind;
+    particle.position = origin;
+    particle.previousPosition = origin;
+    particle.velocity = direction * speed;
+    particle.gravity = random_.Range(60.0f, 105.0f);
+    particle.dragPerSecond = random_.Range(1.0f, 2.2f);
+    particle.lifetimeSeconds = random_.Range(0.42f, 0.68f);
+    particle.startRadius = random_.Range(1.1f, 1.9f);
+    particle.endRadius = 0.15f;
+    particle.startColor = color;
+    particle.endColor = { color.r, color.g * 0.45f, color.b * 0.25f, 0.0f };
+    return particle;
+}
+
 bool FireworkAnimator::IsSceneFinished() const
 {
     if (scene_.stage == FireworkStage::Finished) {
@@ -208,5 +318,36 @@ bool FireworkAnimator::IsSceneFinished() const
     if (scene_.stage != FireworkStage::Afterglow) {
         return false;
     }
-    return scene_.particles.empty();
+    return scene_.particles.empty() && !scene_.flashCore.active && !scene_.shockwave.active;
+}
+
+FireworkPalette FireworkAnimator::PickPalette()
+{
+    const int choice = random_.RangeInt(1, 100);
+    if (choice <= 50) {
+        scene_.paletteName = L"GoldWhite";
+        return {
+            { 1.00f, 0.98f, 0.90f, 1.0f },
+            { 1.00f, 0.72f, 0.18f, 1.0f },
+            { 1.00f, 0.90f, 0.52f, 1.0f },
+            { 1.00f, 0.45f, 0.08f, 1.0f }
+        };
+    }
+    if (choice <= 80) {
+        scene_.paletteName = L"BlueGold";
+        return {
+            { 1.00f, 1.00f, 1.00f, 1.0f },
+            { 0.32f, 0.72f, 1.00f, 1.0f },
+            { 0.68f, 0.88f, 1.00f, 1.0f },
+            { 1.00f, 0.72f, 0.18f, 1.0f }
+        };
+    }
+
+    scene_.paletteName = L"PurpleRose";
+    return {
+        { 1.00f, 0.96f, 1.00f, 1.0f },
+        { 0.72f, 0.38f, 1.00f, 1.0f },
+        { 1.00f, 0.46f, 0.70f, 1.0f },
+        { 0.90f, 0.76f, 1.00f, 1.0f }
+    };
 }

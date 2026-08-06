@@ -15,6 +15,7 @@
 
 #include "FireworkTypes.h"
 
+#include <string>
 #include <vector>
 
 enum class FireworkStage {
@@ -64,6 +65,32 @@ struct Particle {
     bool drawTrail = false;
 };
 
+struct FireworkPalette {
+    ColorF core;
+    ColorF primary;
+    ColorF secondary;
+    ColorF accent;
+};
+
+struct FlashCore {
+    Vec2 position;
+    float ageSeconds = 0.0f;
+    float durationSeconds = 0.18f;
+    float startRadius = 18.0f;
+    ColorF color { 1.0f, 0.98f, 0.9f, 1.0f };
+    bool active = false;
+};
+
+struct Shockwave {
+    Vec2 position;
+    float ageSeconds = 0.0f;
+    float durationSeconds = 0.32f;
+    float startRadius = 6.0f;
+    float endRadius = 42.0f;
+    ColorF color { 1.0f, 0.72f, 0.18f, 0.55f };
+    bool active = false;
+};
+
 struct FireworkPlayParameters {
     Vec2 launchPointLocal;
     Vec2 burstPointLocal;
@@ -76,11 +103,16 @@ struct FireworkScene {
     FireworkStage stage = FireworkStage::Idle;
     float elapsedSeconds = 0.0f;
     Rocket rocket;
+    FlashCore flashCore;
+    Shockwave shockwave;
     std::vector<Particle> particles;
+    FireworkPalette palette;
+    std::wstring paletteName = L"GoldWhite";
     UINT dpi = 96;
     LaunchDirection direction = LaunchDirection::Up;
     uint64_t randomSeed = 0;
     bool ignitionCreated = false;
+    bool mainBurstCreated = false;
 };
 
 Vec2 LaunchAxis(LaunchDirection direction);
@@ -88,4 +120,3 @@ Vec2 LateralAxis(LaunchDirection direction);
 void UpdateRocket(Rocket* rocket, float dt);
 void UpdateParticle(Particle* particle, float dt);
 float NormalizedAge(const Particle& particle);
-

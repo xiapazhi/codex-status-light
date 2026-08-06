@@ -33,6 +33,8 @@ private:
     void Clear();
     void DrawRocket(const Rocket& rocket);
     void DrawParticle(const Particle& particle);
+    void DrawFlashCore(const FlashCore& core);
+    void DrawShockwave(const Shockwave& shockwave);
     void DrawSoftCircle(const Vec2& center, float radius, const ColorF& color);
     void DrawGlowTrail(const Vec2& from, const Vec2& to, float width, const ColorF& color);
     void BlendPremultipliedPixel(int x, int y, const ColorF& color);
@@ -40,4 +42,3 @@ private:
 
     DibSurface surface_;
 };
-

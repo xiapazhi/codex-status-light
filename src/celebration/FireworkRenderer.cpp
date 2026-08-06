@@ -34,6 +34,17 @@ float TrailAlpha(float t)
     return inverse * inverse;
 }
 
+float ParticleAlpha(float t)
+{
+    const float fadeIn = t <= 0.08f ? t / 0.08f : 1.0f;
+    const float fadeOutStart = 0.45f;
+    float fadeOut = 1.0f;
+    if (t > fadeOutStart) {
+        fadeOut = 1.0f - Clamp01((t - fadeOutStart) / (1.0f - fadeOutStart));
+    }
+    return Clamp01(fadeIn) * Clamp01(fadeOut);
+}
+
 } // namespace
 
 FireworkRenderer::FireworkRenderer() = default;
@@ -96,12 +107,14 @@ bool FireworkRenderer::Resize(int width, int height)
 void FireworkRenderer::Render(const FireworkScene& scene)
 {
     Clear();
+    DrawShockwave(scene.shockwave);
     for (const Particle& particle : scene.particles) {
         DrawParticle(particle);
     }
     if (scene.stage == FireworkStage::Launch || scene.stage == FireworkStage::Ignition) {
         DrawRocket(scene.rocket);
     }
+    DrawFlashCore(scene.flashCore);
 }
 
 void FireworkRenderer::RenderTestDot(const FireworkOverlayPlacement& placement)
@@ -165,7 +178,8 @@ void FireworkRenderer::DrawRocket(const Rocket& rocket)
 void FireworkRenderer::DrawParticle(const Particle& particle)
 {
     const float age = NormalizedAge(particle);
-    const float alpha = TrailAlpha(age);
+    const bool isRocketTrail = particle.kind == ParticleKind::RocketTrail;
+    const float alpha = isRocketTrail ? TrailAlpha(age) : ParticleAlpha(age);
     const float radius = Lerp(particle.startRadius, particle.endRadius, age);
     ColorF color;
     color.r = Lerp(particle.startColor.r, particle.endColor.r, age);
@@ -173,8 +187,50 @@ void FireworkRenderer::DrawParticle(const Particle& particle)
     color.b = Lerp(particle.startColor.b, particle.endColor.b, age);
     color.a = Lerp(particle.startColor.a, particle.endColor.a, age) * alpha;
 
-    DrawGlowTrail(particle.previousPosition, particle.position, radius * 0.75f, color);
+    if (particle.drawTrail || isRocketTrail) {
+        DrawGlowTrail(particle.previousPosition, particle.position, radius * 0.75f, color);
+    }
     DrawSoftCircle(particle.position, radius, color);
+}
+
+void FireworkRenderer::DrawFlashCore(const FlashCore& core)
+{
+    if (!core.active) {
+        return;
+    }
+
+    const float age = Clamp01(core.ageSeconds / core.durationSeconds);
+    const float radius = Lerp(core.startRadius, 2.0f, age);
+    ColorF outer = core.color;
+    outer.a *= (1.0f - age) * 0.75f;
+    DrawSoftCircle(core.position, radius, outer);
+
+    ColorF inner = core.color;
+    inner.a *= 1.0f - age;
+    DrawSoftCircle(core.position, radius * 0.34f, inner);
+}
+
+void FireworkRenderer::DrawShockwave(const Shockwave& shockwave)
+{
+    if (!shockwave.active) {
+        return;
+    }
+
+    const float age = Clamp01(shockwave.ageSeconds / shockwave.durationSeconds);
+    const float radius = Lerp(shockwave.startRadius, shockwave.endRadius, age);
+    ColorF color = shockwave.color;
+    color.a *= 1.0f - age;
+
+    const int samples = std::max(18, static_cast<int>(radius * 2.4f));
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    for (int index = 0; index < samples; ++index) {
+        const float angle = kTwoPi * static_cast<float>(index) / static_cast<float>(samples);
+        const Vec2 point {
+            shockwave.position.x + std::cos(angle) * radius,
+            shockwave.position.y + std::sin(angle) * radius
+        };
+        DrawSoftCircle(point, 1.1f, color);
+    }
 }
 
 void FireworkRenderer::DrawSoftCircle(const Vec2& center, float radius, const ColorF& color)
@@ -264,4 +320,3 @@ float FireworkRenderer::SmoothStep(float edge0, float edge1, float value) const
     const float t = Clamp01((value - edge0) / (edge1 - edge0));
     return t * t * (3.0f - 2.0f * t);
 }
-

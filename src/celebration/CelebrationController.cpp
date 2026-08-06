@@ -177,7 +177,7 @@ bool CelebrationController::TryStartTestDot()
     diagnostics_.lastParticlePeak = static_cast<uint32_t>(animator_.Scene().particles.size());
     diagnostics_.lastRandomSeed = animator_.Scene().randomSeed;
     diagnostics_.lastAnimationDurationMs = 0;
-    diagnostics_.lastPalette = L"P1Launch";
+    diagnostics_.lastPalette = animator_.Scene().paletteName;
     diagnostics_.lastSuppressionReason = L"None";
     animationStartedTick_ = GetTickCount64();
     retryIndex_ = 0;

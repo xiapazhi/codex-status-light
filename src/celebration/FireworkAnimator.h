@@ -29,16 +29,22 @@ public:
 private:
     void UpdateIgnition(float dt);
     void UpdateLaunch(float dt);
+    void CreateMainBurst();
+    void UpdateBurst(float dt);
     void UpdateParticles(float dt);
     void RemoveExpiredParticles();
     void AddIgnitionParticles();
     void AddRocketTrailParticles();
+    void AddBurstSparkParticles(const Vec2& origin);
+    void AddMeteorSparkParticles(const Vec2& origin);
+    void AddFineSparkParticles(const Vec2& origin);
     Particle MakeRocketTrail();
+    Particle MakeBurstParticle(const Vec2& origin, ParticleKind kind, float angle, float speed, const ColorF& color);
     bool IsSceneFinished() const;
+    FireworkPalette PickPalette();
 
     FireworkScene scene_;
     bool running_ = false;
     std::chrono::steady_clock::time_point previousTick_;
     Random random_ { 1 };
 };
-
