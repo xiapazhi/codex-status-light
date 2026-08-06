@@ -11,7 +11,7 @@
 # - P2 阶段包含控制台解析能力和 Win32 托盘显示
 cmake_minimum_required(VERSION 3.12)
 
-project(CodexStatusLight LANGUAGES CXX)
+project(CodexStatusLight LANGUAGES CXX RC)
 
 if (MSVC)
     foreach(flag_var
@@ -56,6 +56,7 @@ add_executable(StatusLight
     src/web/WebBridgePipeServer.cpp
     src/web/WebSourceController.cpp
     src/web/WebSelfTest.cpp
+    resources/statuslight.rc
 )
 
 target_compile_features(StatusLight PRIVATE cxx_std_17)
@@ -79,8 +80,5 @@ endif()
 
 add_custom_command(TARGET StatusLight POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist/assets/audio"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:StatusLight>" "${CMAKE_SOURCE_DIR}/dist/StatusLight.exe"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/audio/firework_explosion_fizz_005.mp3" "${CMAKE_SOURCE_DIR}/dist/assets/audio/firework_explosion_fizz_005.mp3"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/audio/firework_explosion_fizz_002.mp3" "${CMAKE_SOURCE_DIR}/dist/assets/audio/firework_explosion_fizz_002.mp3"
 )

@@ -1,9 +1,9 @@
 /**
  * 文件作用：声明烟花爆炸音效播放器
  * 职责范围：
- * 1. 从程序目录下的 assets/audio 查找烟花 MP3 资源
+ * 1. 从 exe 内嵌 RCDATA 资源提取烟花 MP3 到临时缓存
  * 2. 使用 Windows MCI 异步播放一次爆炸音效
- * 3. 在关闭程序或下一次播放前清理上一次 MCI 设备
+ * 3. 在关闭程序前清理打开的 MCI 设备
  *
  * 不负责：
  * - 解码音频数据
@@ -35,14 +35,14 @@ public:
     std::wstring LastError() const;
 
 private:
-    std::wstring AssetPath(FireworkAudioProfile profile) const;
+    std::wstring ResourceCachePath(FireworkAudioProfile profile) const;
+    std::wstring EnsureResourceCacheFile(FireworkAudioProfile profile);
     void WorkerLoop();
     void PlayExplosionOnWorker(FireworkAudioProfile profile);
     bool SendMciCommand(const std::wstring& command);
     void SetLastError(const std::wstring& error);
     void TrimOpenAliases();
 
-    std::wstring executableDirectory_;
     std::wstring lastError_;
     std::vector<std::wstring> openAliases_;
     std::deque<FireworkAudioProfile> pendingProfiles_;

@@ -1,8 +1,8 @@
 /**
  * 文件作用：实现烟花爆炸音效播放器
  * 职责范围：
- * 1. 定位 exe 同级 assets/audio 目录
- * 2. 用 MCI 打开并异步播放 MP3 音效
+ * 1. 从 exe 内嵌资源提取烟花 MP3 临时缓存
+ * 2. 用后台线程调用 MCI 打开并异步播放 MP3 音效
  * 3. 记录最近一次播放失败原因供诊断使用
  *
  * 不负责：
@@ -11,9 +11,11 @@
  * - 打包或复制音频资源
  *
  * 维护说明：
- * - MCI 命令字符串对引号敏感，文件路径必须用双引号包裹。
+ * - MCI 不能直接播放内存中的 MP3，因此运行时只在临时目录生成缓存文件。
  */
 #include "FireworkAudioPlayer.h"
+
+#include "../../resources/resource.h"
 
 #include <mmsystem.h>
 
@@ -34,6 +36,20 @@ std::wstring MciErrorText(MCIERROR error)
     return buffer;
 }
 
+int AudioResourceId(FireworkAudioProfile profile)
+{
+    return profile == FireworkAudioProfile::Crackle002 ?
+        IDR_FIREWORK_AUDIO_CRACKLE_002 :
+        IDR_FIREWORK_AUDIO_IMPACT_005;
+}
+
+const wchar_t* AudioFileName(FireworkAudioProfile profile)
+{
+    return profile == FireworkAudioProfile::Crackle002 ?
+        kCrackleAudioFile :
+        kImpactAudioFile;
+}
+
 } // namespace
 
 bool FireworkAudioPlayer::Initialize()
@@ -43,23 +59,6 @@ bool FireworkAudioPlayer::Initialize()
         return true;
     }
 
-    wchar_t modulePath[MAX_PATH] {};
-    const DWORD length = GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(_countof(modulePath)));
-    if (length == 0 || length >= _countof(modulePath)) {
-        lastError_ = L"GetModuleFileNameFailed";
-        initialized_ = false;
-        return false;
-    }
-
-    executableDirectory_ = modulePath;
-    const size_t slash = executableDirectory_.find_last_of(L"\\/");
-    if (slash == std::wstring::npos) {
-        lastError_ = L"ExecutableDirectoryUnavailable";
-        initialized_ = false;
-        return false;
-    }
-
-    executableDirectory_.resize(slash);
     initialized_ = true;
     shuttingDown_ = false;
     lastError_ = L"None";
@@ -107,10 +106,8 @@ void FireworkAudioPlayer::WorkerLoop()
 
 void FireworkAudioPlayer::PlayExplosionOnWorker(FireworkAudioProfile profile)
 {
-    const std::wstring audioPath = AssetPath(profile);
-    const DWORD attributes = GetFileAttributesW(audioPath.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        SetLastError(L"AudioAssetMissing");
+    const std::wstring audioPath = EnsureResourceCacheFile(profile);
+    if (audioPath.empty()) {
         return;
     }
 
@@ -151,12 +148,83 @@ std::wstring FireworkAudioPlayer::LastError() const
     return lastError_;
 }
 
-std::wstring FireworkAudioPlayer::AssetPath(FireworkAudioProfile profile) const
+std::wstring FireworkAudioPlayer::ResourceCachePath(FireworkAudioProfile profile) const
 {
-    const wchar_t* fileName = profile == FireworkAudioProfile::Crackle002 ?
-        kCrackleAudioFile :
-        kImpactAudioFile;
-    return executableDirectory_ + L"\\assets\\audio\\" + fileName;
+    wchar_t tempPath[MAX_PATH] {};
+    const DWORD tempPathLength = GetTempPathW(static_cast<DWORD>(_countof(tempPath)), tempPath);
+    if (tempPathLength == 0 || tempPathLength >= _countof(tempPath)) {
+        return std::wstring();
+    }
+
+    return std::wstring(tempPath) + L"StatusLight\\audio\\" + AudioFileName(profile);
+}
+
+std::wstring FireworkAudioPlayer::EnsureResourceCacheFile(FireworkAudioProfile profile)
+{
+    HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(AudioResourceId(profile)), RT_RCDATA);
+    if (resource == nullptr) {
+        SetLastError(L"AudioResourceMissing");
+        return std::wstring();
+    }
+
+    const DWORD resourceSize = SizeofResource(nullptr, resource);
+    HGLOBAL loadedResource = LoadResource(nullptr, resource);
+    const void* resourceBytes = loadedResource == nullptr ? nullptr : LockResource(loadedResource);
+    if (resourceSize == 0 || resourceBytes == nullptr) {
+        SetLastError(L"AudioResourceLoadFailed");
+        return std::wstring();
+    }
+
+    const std::wstring audioPath = ResourceCachePath(profile);
+    if (audioPath.empty()) {
+        SetLastError(L"AudioCachePathUnavailable");
+        return std::wstring();
+    }
+
+    wchar_t tempPath[MAX_PATH] {};
+    const DWORD tempPathLength = GetTempPathW(static_cast<DWORD>(_countof(tempPath)), tempPath);
+    if (tempPathLength == 0 || tempPathLength >= _countof(tempPath)) {
+        SetLastError(L"AudioCachePathUnavailable");
+        return std::wstring();
+    }
+
+    const std::wstring rootDirectory = std::wstring(tempPath) + L"StatusLight";
+    const std::wstring audioDirectory = rootDirectory + L"\\audio";
+    CreateDirectoryW(rootDirectory.c_str(), nullptr);
+    CreateDirectoryW(audioDirectory.c_str(), nullptr);
+
+    WIN32_FILE_ATTRIBUTE_DATA fileInfo {};
+    const BOOL hasExistingFile = GetFileAttributesExW(audioPath.c_str(), GetFileExInfoStandard, &fileInfo);
+    const uint64_t existingSize =
+        (static_cast<uint64_t>(fileInfo.nFileSizeHigh) << 32) |
+        static_cast<uint64_t>(fileInfo.nFileSizeLow);
+    if (hasExistingFile != FALSE && existingSize == resourceSize) {
+        return audioPath;
+    }
+
+    HANDLE file = CreateFileW(
+        audioPath.c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_TEMPORARY,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        SetLastError(L"AudioCacheCreateFailed");
+        return std::wstring();
+    }
+
+    DWORD written = 0;
+    const BOOL wroteFile = WriteFile(file, resourceBytes, resourceSize, &written, nullptr);
+    CloseHandle(file);
+    if (wroteFile == FALSE || written != resourceSize) {
+        DeleteFileW(audioPath.c_str());
+        SetLastError(L"AudioCacheWriteFailed");
+        return std::wstring();
+    }
+
+    return audioPath;
 }
 
 bool FireworkAudioPlayer::SendMciCommand(const std::wstring& command)

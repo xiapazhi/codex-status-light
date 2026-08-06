@@ -1,0 +1,8 @@
+// 文件作用：把 StatusLight 运行所需的二进制资源编入 exe。
+// 职责范围：声明烟花 MP3 音效的 RCDATA 资源。
+// 不负责：运行时提取、播放或清理临时缓存文件。
+// 维护说明：路径相对本 rc 文件所在目录，资源 ID 必须与 resource.h 保持一致。
+#include "resource.h"
+
+IDR_FIREWORK_AUDIO_IMPACT_005 RCDATA "audio/firework_explosion_fizz_005.mp3"
+IDR_FIREWORK_AUDIO_CRACKLE_002 RCDATA "audio/firework_explosion_fizz_002.mp3"
