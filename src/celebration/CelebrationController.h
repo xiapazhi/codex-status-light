@@ -15,6 +15,7 @@
 #pragma once
 
 #include "FireworkDiagnostics.h"
+#include "FireworkAudioPlayer.h"
 #include "FireworkAnimator.h"
 #include "FireworkOverlayWindow.h"
 #include "CelebrationPolicy.h"
@@ -57,6 +58,7 @@ private:
     FireworkOverlayWindow overlay_;
     FireworkRenderer renderer_;
     FireworkAnimator animator_;
+    FireworkAudioPlayer audioPlayer_;
     CelebrationPolicy policy_;
     CelebrationSettings settings_;
     FireworkDiagnostics diagnostics_;

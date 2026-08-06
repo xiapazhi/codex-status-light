@@ -33,6 +33,8 @@ struct FireworkDiagnostics {
     uint32_t lastParticlePeak = 0;
     uint64_t lastRandomSeed = 0;
     std::wstring lastPalette = L"P1Launch";
+    std::wstring lastAudioProfile = L"None";
+    std::wstring lastAudioError = L"None";
     std::wstring lastSuppressionReason = L"None";
     std::wstring lastWin32Operation;
     DWORD lastWin32Error = 0;

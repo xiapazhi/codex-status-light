@@ -54,8 +54,10 @@ void FireworkAnimator::Start(const FireworkPlayParameters& parameters)
     scene_.burstScale = PercentToScale(parameters.burstSizePercent);
     scene_.randomSeed = seed;
     scene_.palette = PickPalette();
+    scene_.audioProfile = PickAudioProfile();
     scene_.particles.reserve(kMaxParticles);
     scene_.secondaryBursts.reserve(4);
+    explosionStarted_ = false;
 
     const Vec2 axis = LaunchAxis(parameters.direction);
     const Vec2 lateral = LateralAxis(parameters.direction);
@@ -126,6 +128,13 @@ const FireworkScene& FireworkAnimator::Scene() const noexcept
     return scene_;
 }
 
+bool FireworkAnimator::ConsumeExplosionStarted() noexcept
+{
+    const bool result = explosionStarted_;
+    explosionStarted_ = false;
+    return result;
+}
+
 void FireworkAnimator::UpdateIgnition(float /*dt*/)
 {
     if (!scene_.ignitionCreated) {
@@ -146,6 +155,7 @@ void FireworkAnimator::UpdateLaunch(float dt)
     if (launchFinished) {
         scene_.rocket.exploded = true;
         CreateMainBurst();
+        explosionStarted_ = true;
         scene_.stage = FireworkStage::MainBurst;
     }
 }
@@ -158,17 +168,18 @@ void FireworkAnimator::CreateMainBurst()
 
     const Vec2 origin = scene_.rocket.position;
     const float burstScale = scene_.burstScale;
+    const bool crackleProfile = scene_.audioProfile == FireworkAudioProfile::Crackle002;
     scene_.flashCore.position = origin;
     scene_.flashCore.color = scene_.palette.core;
-    scene_.flashCore.durationSeconds = 0.42f;
-    scene_.flashCore.startRadius = static_cast<float>(ScalePx(22, scene_.dpi)) * burstScale;
+    scene_.flashCore.durationSeconds = crackleProfile ? 0.34f : 0.46f;
+    scene_.flashCore.startRadius = static_cast<float>(ScalePx(crackleProfile ? 20 : 24, scene_.dpi)) * burstScale;
     scene_.flashCore.active = true;
 
     scene_.shockwave.position = origin;
     scene_.shockwave.color = scene_.palette.primary;
-    scene_.shockwave.durationSeconds = 0.92f;
-    scene_.shockwave.startRadius = static_cast<float>(ScalePx(8, scene_.dpi)) * burstScale;
-    scene_.shockwave.endRadius = static_cast<float>(ScalePx(52, scene_.dpi)) * burstScale;
+    scene_.shockwave.durationSeconds = crackleProfile ? 0.74f : 0.98f;
+    scene_.shockwave.startRadius = static_cast<float>(ScalePx(crackleProfile ? 7 : 9, scene_.dpi)) * burstScale;
+    scene_.shockwave.endRadius = static_cast<float>(ScalePx(crackleProfile ? 48 : 58, scene_.dpi)) * burstScale;
     scene_.shockwave.active = true;
 
     AddBurstSparkParticles(origin);
@@ -338,7 +349,11 @@ void FireworkAnimator::AddSecondaryBurstSeeds(const Vec2& origin)
         const float distance = random_.Range(18.0f, 40.0f) * scene_.burstScale;
         SecondaryBurstSeed seed;
         seed.position = origin + Vec2 { std::cos(angle), std::sin(angle) } * distance;
-        seed.triggerSeconds = random_.Range(0.38f, 0.54f);
+        if (scene_.audioProfile == FireworkAudioProfile::Crackle002) {
+            seed.triggerSeconds = random_.Range(0.30f, 0.46f);
+        } else {
+            seed.triggerSeconds = random_.Range(0.42f, 0.58f);
+        }
         seed.color = index % 2 == 0 ? scene_.palette.secondary : scene_.palette.accent;
         scene_.secondaryBursts.push_back(seed);
     }
@@ -433,4 +448,10 @@ FireworkPalette FireworkAnimator::PickPalette()
         { 1.00f, 0.46f, 0.70f, 1.0f },
         { 0.90f, 0.76f, 1.00f, 1.0f }
     };
+}
+
+FireworkAudioProfile FireworkAnimator::PickAudioProfile()
+{
+    const int choice = random_.RangeInt(1, 100);
+    return choice <= 70 ? FireworkAudioProfile::Impact005 : FireworkAudioProfile::Crackle002;
 }

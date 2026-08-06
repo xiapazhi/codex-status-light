@@ -28,6 +28,13 @@ std::wstring YesNo(bool value)
     return value ? L"yes" : L"no";
 }
 
+const wchar_t* AudioProfileText(FireworkAudioProfile profile)
+{
+    return profile == FireworkAudioProfile::Crackle002 ?
+        L"firework_explosion_fizz_002" :
+        L"firework_explosion_fizz_005";
+}
+
 float LaunchDistancePx(const TrayAnchor& anchor, uint32_t launchHeightPercent)
 {
     if (launchHeightPercent >= 500) {
@@ -53,12 +60,14 @@ bool CelebrationController::Initialize(HINSTANCE instance, HWND mainWindow, UINT
     trayIconId_ = trayIconId;
     settings_ = policy_.LoadSettings();
     diagnostics_.enabled = settings_.fireworksEnabled;
+    audioPlayer_.Initialize();
     return overlay_.Initialize(instance_, &diagnostics_);
 }
 
 void CelebrationController::Shutdown()
 {
     StopTimer();
+    audioPlayer_.Shutdown();
     overlay_.Shutdown();
     diagnostics_.active = false;
 }
@@ -152,6 +161,12 @@ void CelebrationController::OnTimer()
 {
     if (animator_.IsRunning() && activePlacement_.has_value()) {
         animator_.Tick(std::chrono::steady_clock::now());
+        if (animator_.ConsumeExplosionStarted()) {
+            const FireworkAudioProfile audioProfile = animator_.Scene().audioProfile;
+            audioPlayer_.PlayExplosion(audioProfile);
+            diagnostics_.lastAudioProfile = AudioProfileText(audioProfile);
+            diagnostics_.lastAudioError = audioPlayer_.LastError();
+        }
         renderer_.Render(animator_.Scene());
         overlay_.Present(renderer_.Surface(), activePlacement_->screenPosition);
 
@@ -217,6 +232,8 @@ std::wstring CelebrationController::BuildDiagnostics() const
     output << L"Last animation duration: " << diagnostics_.lastAnimationDurationMs << L"ms\n";
     output << L"Last particle peak: " << diagnostics_.lastParticlePeak << L"\n";
     output << L"Last palette: " << diagnostics_.lastPalette << L"\n";
+    output << L"Last audio profile: " << diagnostics_.lastAudioProfile << L"\n";
+    output << L"Last audio error: " << diagnostics_.lastAudioError << L"\n";
     output << L"Last random seed: " << diagnostics_.lastRandomSeed << L"\n";
     output << L"Layered window failures: " << diagnostics_.layeredWindowFailures << L"\n";
     if (!diagnostics_.lastWin32Operation.empty()) {

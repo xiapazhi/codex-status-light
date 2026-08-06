@@ -25,6 +25,7 @@ public:
     void Tick(std::chrono::steady_clock::time_point now);
     bool IsRunning() const noexcept;
     const FireworkScene& Scene() const noexcept;
+    bool ConsumeExplosionStarted() noexcept;
 
 private:
     void UpdateIgnition(float dt);
@@ -46,9 +47,11 @@ private:
     Particle MakeBurstParticle(const Vec2& origin, ParticleKind kind, float angle, float speed, const ColorF& color);
     bool IsSceneFinished() const;
     FireworkPalette PickPalette();
+    FireworkAudioProfile PickAudioProfile();
 
     FireworkScene scene_;
     bool running_ = false;
+    bool explosionStarted_ = false;
     std::chrono::steady_clock::time_point previousTick_;
     Random random_ { 1 };
 };

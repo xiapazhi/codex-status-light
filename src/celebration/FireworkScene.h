@@ -27,6 +27,11 @@ enum class FireworkStage {
     Finished
 };
 
+enum class FireworkAudioProfile {
+    Impact005,
+    Crackle002
+};
+
 enum class ParticleKind {
     RocketTrail,
     BurstSpark,
@@ -125,6 +130,7 @@ struct FireworkScene {
     float launchHeightScale = 2.2f;
     float burstScale = 1.7f;
     uint64_t randomSeed = 0;
+    FireworkAudioProfile audioProfile = FireworkAudioProfile::Impact005;
     bool ignitionCreated = false;
     bool mainBurstCreated = false;
 };

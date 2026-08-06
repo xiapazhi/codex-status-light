@@ -39,6 +39,7 @@ add_executable(StatusLight
     src/TrayApp.cpp
     src/celebration/CelebrationController.cpp
     src/celebration/CelebrationPolicy.cpp
+    src/celebration/FireworkAudioPlayer.cpp
     src/celebration/FireworkAnimator.cpp
     src/celebration/FireworkOverlayWindow.cpp
     src/celebration/FireworkRenderer.cpp
@@ -66,7 +67,7 @@ target_compile_definitions(StatusLight PRIVATE
     WIN32_LEAN_AND_MEAN
 )
 
-target_link_libraries(StatusLight PRIVATE advapi32)
+target_link_libraries(StatusLight PRIVATE advapi32 winmm)
 
 if (MSVC)
     target_compile_options(StatusLight PRIVATE /W4 /permissive- /utf-8)
@@ -78,5 +79,8 @@ endif()
 
 add_custom_command(TARGET StatusLight POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist/assets/audio"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:StatusLight>" "${CMAKE_SOURCE_DIR}/dist/StatusLight.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/audio/firework_explosion_fizz_005.mp3" "${CMAKE_SOURCE_DIR}/dist/assets/audio/firework_explosion_fizz_005.mp3"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/audio/firework_explosion_fizz_002.mp3" "${CMAKE_SOURCE_DIR}/dist/assets/audio/firework_explosion_fizz_002.mp3"
 )
