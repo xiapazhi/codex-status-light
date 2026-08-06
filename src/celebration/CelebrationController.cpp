@@ -48,8 +48,28 @@ void CelebrationController::Shutdown()
 
 void CelebrationController::OnAggregateTransition(const AggregateTransition& transition)
 {
+    if (!UpdatePendingForTransition(&pendingSuccessfulCompletion_, transition)) {
+        return;
+    }
+    const CelebrationDecision decision = policy_.Evaluate(settings_, lastPlayedAt_);
+    if (!decision.canPlay) {
+        diagnostics_.suppressedCount++;
+        diagnostics_.lastSuppressionReason = policy_.ReasonText(decision.reason);
+        return;
+    }
+    PlayTestDot();
+}
+
+bool CelebrationController::UpdatePendingForTransition(
+    bool* pendingSuccessfulCompletion,
+    const AggregateTransition& transition)
+{
+    if (pendingSuccessfulCompletion == nullptr) {
+        return false;
+    }
+
     if (transition.newSuccessCount > 0) {
-        pendingSuccessfulCompletion_ = true;
+        *pendingSuccessfulCompletion = true;
     }
 
     const bool enteredCompleted =
@@ -60,18 +80,13 @@ void CelebrationController::OnAggregateTransition(const AggregateTransition& tra
         transition.newSuccessCount > 0 &&
         transition.waitingCount == 0 &&
         transition.runningCount == 0;
-    if ((!enteredCompleted && !observedFastSuccessAtRest) || !pendingSuccessfulCompletion_) {
-        return;
+
+    if ((!enteredCompleted && !observedFastSuccessAtRest) || !*pendingSuccessfulCompletion) {
+        return false;
     }
 
-    pendingSuccessfulCompletion_ = false;
-    const CelebrationDecision decision = policy_.Evaluate(settings_, lastPlayedAt_);
-    if (!decision.canPlay) {
-        diagnostics_.suppressedCount++;
-        diagnostics_.lastSuppressionReason = policy_.ReasonText(decision.reason);
-        return;
-    }
-    PlayTestDot();
+    *pendingSuccessfulCompletion = false;
+    return true;
 }
 
 void CelebrationController::PlayTestDot()

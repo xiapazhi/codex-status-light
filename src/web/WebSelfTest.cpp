@@ -19,6 +19,7 @@
 #include "NativeHostProtocol.h"
 #include "NativeHostRegistration.h"
 #include "WebSourceController.h"
+#include "../celebration/CelebrationController.h"
 
 #include <iostream>
 #include <set>
@@ -127,6 +128,99 @@ bool VerifyNativeHostRegistration()
     return true;
 }
 
+AggregateTransition MakeCelebrationTransition(
+    CelebrationVisualState previous,
+    CelebrationVisualState current,
+    uint32_t newSuccessCount,
+    uint32_t newFailedCount,
+    uint32_t newCancelledCount,
+    uint32_t waitingCount,
+    uint32_t runningCount)
+{
+    AggregateTransition transition;
+    transition.previousVisual = previous;
+    transition.currentVisual = current;
+    transition.newSuccessCount = newSuccessCount;
+    transition.newFailedCount = newFailedCount;
+    transition.newCancelledCount = newCancelledCount;
+    transition.waitingCount = waitingCount;
+    transition.runningCount = runningCount;
+    transition.completedCount = newSuccessCount + newFailedCount + newCancelledCount;
+    return transition;
+}
+
+bool VerifyCelebrationTriggerRules()
+{
+    bool pending = false;
+    bool ok = true;
+
+    AggregateTransition success = MakeCelebrationTransition(
+        CelebrationVisualState::Running,
+        CelebrationVisualState::Completed,
+        1,
+        0,
+        0,
+        0,
+        0);
+    ok = Expect(CelebrationController::UpdatePendingForTransition(&pending, success) && !pending, "P7 success completion triggers celebration") && ok;
+
+    pending = false;
+    AggregateTransition failed = MakeCelebrationTransition(
+        CelebrationVisualState::Running,
+        CelebrationVisualState::Completed,
+        0,
+        1,
+        0,
+        0,
+        0);
+    ok = Expect(!CelebrationController::UpdatePendingForTransition(&pending, failed) && !pending, "P7 failed completion does not trigger celebration") && ok;
+
+    pending = false;
+    AggregateTransition cancelled = MakeCelebrationTransition(
+        CelebrationVisualState::Running,
+        CelebrationVisualState::Completed,
+        0,
+        0,
+        1,
+        0,
+        0);
+    ok = Expect(!CelebrationController::UpdatePendingForTransition(&pending, cancelled) && !pending, "P7 cancelled completion does not trigger celebration") && ok;
+
+    pending = false;
+    AggregateTransition partialSuccess = MakeCelebrationTransition(
+        CelebrationVisualState::Running,
+        CelebrationVisualState::Running,
+        1,
+        0,
+        0,
+        0,
+        1);
+    ok = Expect(!CelebrationController::UpdatePendingForTransition(&pending, partialSuccess) && pending, "P7 partial success is delayed while running remains") && ok;
+
+    AggregateTransition finalCompletion = MakeCelebrationTransition(
+        CelebrationVisualState::Running,
+        CelebrationVisualState::Completed,
+        0,
+        0,
+        0,
+        0,
+        0);
+    ok = Expect(CelebrationController::UpdatePendingForTransition(&pending, finalCompletion) && !pending, "P7 delayed success plays when aggregate completes") && ok;
+
+    pending = false;
+    AggregateTransition fastSuccess = MakeCelebrationTransition(
+        CelebrationVisualState::Completed,
+        CelebrationVisualState::Completed,
+        1,
+        0,
+        0,
+        0,
+        0);
+    ok = Expect(CelebrationController::UpdatePendingForTransition(&pending, fastSuccess) && !pending, "P7 fast success at rest triggers after baseline") && ok;
+
+    return ok;
+}
+
 } // namespace
 
 int WebSelfTest::Run()
@@ -134,6 +228,7 @@ int WebSelfTest::Run()
     bool ok = true;
     ok = Expect(VerifyNativeHostRegistration(), "P0 Native Host manifest and HKCU registration exist") && ok;
     ok = Expect(VerifyPipePingPong(), "P0 Native Messaging pipe ping/pong works") && ok;
+    ok = VerifyCelebrationTriggerRules() && ok;
     const std::string browserInstanceId = "browser-test";
     WebConversationIdentity conversationOne { "persistent", "conversation-1" };
     WebConversationIdentity conversationTwo { "persistent", "conversation-2" };
@@ -206,5 +301,6 @@ int WebSelfTest::Run()
     std::cout << "P4 self-check: multi-tab dedupe invariants verified\n";
     std::cout << "P5 self-check: account/global count inputs verified\n";
     std::cout << "P6 self-check: invalid observer cleanup invariant verified\n";
+    std::cout << "P7 self-check: celebration trigger and deduplication invariants verified\n";
     return ok ? 0 : 1;
 }

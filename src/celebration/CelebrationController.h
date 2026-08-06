@@ -39,6 +39,7 @@ public:
     bool IsTimerRunning() const noexcept;
     const FireworkDiagnostics& Diagnostics() const noexcept;
     std::wstring BuildDiagnostics() const;
+    static bool UpdatePendingForTransition(bool* pendingSuccessfulCompletion, const AggregateTransition& transition);
 
 private:
     bool TryStartTestDot();
