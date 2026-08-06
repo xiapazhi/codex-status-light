@@ -37,6 +37,16 @@ window.addEventListener('pageshow', () => {
   window.StatusLightLifecycle.notifyResume()
 })
 
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    window.StatusLightLifecycle.notifyResume()
+  }
+})
+
+window.addEventListener('focus', () => {
+  window.StatusLightLifecycle.notifyResume()
+})
+
 window.addEventListener('pagehide', () => {
   window.StatusLightLifecycle.suspended = true
 })

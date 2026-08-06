@@ -14,6 +14,7 @@
  */
 const STATUSLIGHT_CHANNEL = 'statuslight_content'
 const THROTTLE_MS = 300
+const RECOVERY_SCAN_INTERVAL_MS = 5000
 
 if (!window.__StatusLightObserverInstalled) {
   window.__StatusLightObserverInstalled = true
@@ -25,6 +26,7 @@ if (!window.__StatusLightObserverInstalled) {
   let trailingTimer = null
   let lastUrl = window.location.href
   let observer = null
+  let recoveryTimer = null
   let isContextInvalidated = false
 
   function makeMessage(type, payload = {}) {
@@ -42,6 +44,10 @@ if (!window.__StatusLightObserverInstalled) {
     if (trailingTimer) {
       clearTimeout(trailingTimer)
       trailingTimer = null
+    }
+    if (recoveryTimer) {
+      clearInterval(recoveryTimer)
+      recoveryTimer = null
     }
     if (observer) {
       observer.disconnect()
@@ -210,6 +216,10 @@ if (!window.__StatusLightObserverInstalled) {
   window.StatusLightLifecycle.onResume(() => {
     scanNow(true)
   })
+
+  recoveryTimer = setInterval(() => {
+    scanNow(false)
+  }, RECOVERY_SCAN_INTERVAL_MS)
 
   postPayload(makeMessage('tab_registered', {
     documentId,
