@@ -47,6 +47,11 @@ private:
         int windowId = 0;
     };
 
+    struct PendingSnapshotCommand {
+        std::string requestId;
+        std::string browserInstanceId;
+    };
+
     mutable std::mutex mutex_;
     bool enabled_ = false;
     ChatGptConversationStore store_;
@@ -59,22 +64,28 @@ private:
     std::map<std::string, std::set<std::string>> observersByTab_;
     std::map<std::string, std::string> observerIdByFocusRequest_;
     std::vector<PendingFocusCommand> pendingFocusCommands_;
+    std::vector<PendingSnapshotCommand> pendingSnapshotCommands_;
     std::set<std::string> browserInstances_;
     size_t protocolErrorCount_ = 0;
     size_t reconnectAttempts_ = 0;
     size_t noClientPollCount_ = 0;
     uint64_t nextFocusRequestId_ = 1;
+    uint64_t nextSnapshotRequestId_ = 1;
+    int64_t lastActiveSnapshotRequestAt_ = 0;
+    std::string lastActiveSnapshotResult_;
     bool nativeHostRegistered_ = false;
 
     std::string HandleBridgeMessage(const std::string& message);
     std::string HandleParsedMessage(const JsonValue& root);
     std::string HandleExtensionHeartbeat(const JsonValue& root);
     std::string ApplyFocusTabResult(const JsonValue& root);
+    std::string ApplySnapshotResult(const JsonValue& root);
     std::string ApplyTabState(const JsonValue& root);
     std::string ApplyTabRemoved(const JsonValue& root);
     std::string ApplyTabSuspended(const JsonValue& root);
     void RefreshStateLocked(WebMonitorHealth health, const std::wstring& diagnosticMessage);
     std::string MakeAckWithFocusCommandLocked(const PendingFocusCommand& command) const;
+    std::string MakeAckWithSnapshotCommandLocked(const PendingSnapshotCommand& command) const;
     bool ReadRequiredString(const JsonValue& root, const std::string& name, std::string* value);
     bool ReadRequiredInt(const JsonValue& root, const std::string& name, int* value);
     bool ReadOptionalBool(const JsonValue& root, const std::string& name, bool* value);

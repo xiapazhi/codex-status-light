@@ -31,6 +31,19 @@ LONG RectCenterY(const RECT& rect)
     return rect.top + (rect.bottom - rect.top) / 2;
 }
 
+int LaunchDistancePx(const TrayAnchor& anchor, uint32_t launchHeightPercent)
+{
+    const bool horizontalLaunch =
+        anchor.direction == LaunchDirection::Left ||
+        anchor.direction == LaunchDirection::Right;
+    const LONG monitorSize = horizontalLaunch ?
+        anchor.monitorRect.right - anchor.monitorRect.left :
+        anchor.monitorRect.bottom - anchor.monitorRect.top;
+    return static_cast<int>(
+        static_cast<float>(std::max<LONG>(1, monitorSize)) *
+        static_cast<float>(launchHeightPercent) / 1000.0f);
+}
+
 } // namespace
 
 TrayAnchorLocator::TrayAnchorLocator(HWND trayWindow, UINT trayIconId)
@@ -73,15 +86,12 @@ FireworkOverlayPlacement TrayAnchorLocator::BuildPlacement(const TrayAnchor& anc
     const uint32_t heightPercent = std::max<uint32_t>(layout.launchHeightPercent, layout.burstSizePercent);
     int overlayWidth = ScalePx(ScalePercent(210, widthPercent), anchor.dpi);
     int overlayHeight = ScalePx(ScalePercent(180, std::max<uint32_t>(100, heightPercent)), anchor.dpi);
-    if (layout.launchHeightPercent >= 500) {
-        const int monitorWidth = static_cast<int>(anchor.monitorRect.right - anchor.monitorRect.left);
-        const int monitorHeight = static_cast<int>(anchor.monitorRect.bottom - anchor.monitorRect.top);
-        const int burstMargin = ScalePx(160, anchor.dpi);
-        if (anchor.direction == LaunchDirection::Left || anchor.direction == LaunchDirection::Right) {
-            overlayWidth = std::max(overlayWidth, monitorWidth / 2 + burstMargin);
-        } else {
-            overlayHeight = std::max(overlayHeight, monitorHeight / 2 + burstMargin);
-        }
+    const int burstMargin = ScalePx(160, anchor.dpi);
+    const int launchDistance = LaunchDistancePx(anchor, layout.launchHeightPercent);
+    if (anchor.direction == LaunchDirection::Left || anchor.direction == LaunchDirection::Right) {
+        overlayWidth = std::max(overlayWidth, launchDistance + burstMargin);
+    } else {
+        overlayHeight = std::max(overlayHeight, launchDistance + burstMargin);
     }
     const int iconCenterX = static_cast<int>(RectCenterX(anchor.iconRect));
     const int iconCenterY = static_cast<int>(RectCenterY(anchor.iconRect));

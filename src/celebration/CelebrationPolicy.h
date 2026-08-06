@@ -21,7 +21,7 @@
 #include <cstdint>
 #include <string>
 
-constexpr uint32_t kDefaultFireworkLaunchHeightPercent = 220;
+constexpr uint32_t kDefaultFireworkLaunchHeightPercent = 250;
 constexpr uint32_t kDefaultFireworkBurstSizePercent = 170;
 
 struct CelebrationSettings {

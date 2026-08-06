@@ -37,6 +37,12 @@ std::wstring WebDiagnostics::Build(const WebAccountState& state, bool enabled) c
     output << L"Web terminal: " << state.completedCount << L"\n";
     output << L"Last web reason: " << Widen(state.lastReason.empty() ? "unknown" : state.lastReason) << L"\n";
     output << L"Last web state age: " << (state.lastStateChangedAt == 0 ? L"unknown" : L"available") << L"\n";
+    output << L"Last active snapshot request: "
+        << (state.lastActiveSnapshotRequestAt == 0 ? L"never" : L"available")
+        << L"\n";
+    output << L"Last active snapshot result: "
+        << Widen(state.lastActiveSnapshotResult.empty() ? "none" : state.lastActiveSnapshotResult)
+        << L"\n";
     output << L"Native reconnect attempts: " << state.nativeReconnectAttempts << L"\n";
     output << L"Protocol errors: " << state.protocolErrorCount << L"\n";
     if (!state.diagnosticMessage.empty()) {

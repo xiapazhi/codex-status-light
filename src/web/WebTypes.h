@@ -110,6 +110,8 @@ struct WebAccountState {
     size_t observerReinstallCount = 0;
     std::string lastReason;
     int64_t lastStateChangedAt = 0;
+    int64_t lastActiveSnapshotRequestAt = 0;
+    std::string lastActiveSnapshotResult;
     std::string bridgeState;
     std::wstring diagnosticMessage;
 };

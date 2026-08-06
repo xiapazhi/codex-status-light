@@ -41,18 +41,14 @@ const wchar_t* AudioProfileText(FireworkAudioProfile profile)
 
 float LaunchDistancePx(const TrayAnchor& anchor, uint32_t launchHeightPercent)
 {
-    if (launchHeightPercent >= 500) {
-        const bool horizontalLaunch =
-            anchor.direction == LaunchDirection::Left ||
-            anchor.direction == LaunchDirection::Right;
-        const LONG monitorSize = horizontalLaunch ?
-            anchor.monitorRect.right - anchor.monitorRect.left :
-            anchor.monitorRect.bottom - anchor.monitorRect.top;
-        return static_cast<float>(std::max<LONG>(1, monitorSize)) * 0.5f;
-    }
-
-    return static_cast<float>(ScalePx(72, anchor.dpi)) *
-        static_cast<float>(launchHeightPercent) / 100.0f;
+    const bool horizontalLaunch =
+        anchor.direction == LaunchDirection::Left ||
+        anchor.direction == LaunchDirection::Right;
+    const LONG monitorSize = horizontalLaunch ?
+        anchor.monitorRect.right - anchor.monitorRect.left :
+        anchor.monitorRect.bottom - anchor.monitorRect.top;
+    return static_cast<float>(std::max<LONG>(1, monitorSize)) *
+        static_cast<float>(launchHeightPercent) / 1000.0f;
 }
 
 Vec2 StartOffset(LaunchDirection direction, UINT dpi, uint32_t index)

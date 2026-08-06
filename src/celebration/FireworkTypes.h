@@ -116,7 +116,7 @@ struct FireworkOverlayPlacement {
 };
 
 struct FireworkLayoutSettings {
-    uint32_t launchHeightPercent = 220;
+    uint32_t launchHeightPercent = 250;
     uint32_t burstSizePercent = 170;
 };
 

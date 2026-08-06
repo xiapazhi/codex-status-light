@@ -497,6 +497,10 @@ function connectNative() {
     if (message.command && message.command.type === 'focus_tab') {
       executeFocusCommand(message.command)
     }
+
+    if (message.command && message.command.type === 'request_snapshot') {
+      executeSnapshotCommand(message.command)
+    }
   })
 
   connectedPort.onDisconnect.addListener(() => {
@@ -548,6 +552,70 @@ async function executeFocusCommand(command) {
       ok: false,
       error: errorText(error),
     }))
+  }
+}
+
+async function executeSnapshotCommand(command) {
+  const requestId = command.requestId || ''
+  let checkedTabs = 0
+  let updatedTabs = 0
+  let failedTabs = 0
+
+  try {
+    const tabs = await chrome.tabs.query({ url: CHATGPT_URL_PATTERN })
+    checkedTabs = tabs.length
+
+    for (const tab of tabs) {
+      if (typeof tab.id !== 'number') {
+        failedTabs += 1
+        continue
+      }
+
+      const isObserverReady = await ensureContentObserver(tab.id)
+      if (!isObserverReady) {
+        failedTabs += 1
+        continue
+      }
+
+      try {
+        await chrome.tabs.sendMessage(tab.id, makeMessage('request_snapshot'))
+        updatedTabs += 1
+      } catch (error) {
+        failedTabs += 1
+        saveDiagnostic({
+          lastEvent: 'active_snapshot_failed',
+          lastMessageType: 'request_snapshot',
+          lastError: errorText(error),
+        })
+      }
+    }
+
+    postToNative(makeMessage('request_snapshot_result', {
+      requestId,
+      ok: failedTabs === 0,
+      checkedTabs,
+      updatedTabs,
+      failedTabs,
+    }))
+    saveDiagnostic({
+      lastEvent: 'active_snapshot_completed',
+      lastMessageType: 'request_snapshot',
+      lastError: failedTabs === 0 ? '' : `failed tabs: ${failedTabs}`,
+    })
+  } catch (error) {
+    postToNative(makeMessage('request_snapshot_result', {
+      requestId,
+      ok: false,
+      checkedTabs,
+      updatedTabs,
+      failedTabs: failedTabs + 1,
+      error: errorText(error),
+    }))
+    saveDiagnostic({
+      lastEvent: 'active_snapshot_throw',
+      lastMessageType: 'request_snapshot',
+      lastError: errorText(error),
+    })
   }
 }
 

@@ -26,6 +26,7 @@
 namespace {
 
 constexpr size_t kMaxNoClientPollsBeforeError = 5;
+constexpr int64_t kActiveSnapshotConfirmIntervalMs = 30000;
 
 int64_t CurrentTimeMs()
 {
@@ -94,9 +95,12 @@ void WebSourceController::Disable()
     observersByTab_.clear();
     observerIdByFocusRequest_.clear();
     pendingFocusCommands_.clear();
+    pendingSnapshotCommands_.clear();
     lastSequenceByObserver_.clear();
     reconnectAttempts_ = 0;
     noClientPollCount_ = 0;
+    lastActiveSnapshotRequestAt_ = 0;
+    lastActiveSnapshotResult_.clear();
     RefreshStateLocked(WebMonitorHealth::Normal, L"");
     WebDebugLog::Write(L"WebSource", L"disabled and state cleared");
 }
@@ -112,6 +116,7 @@ void WebSourceController::PollOnce()
     std::lock_guard<std::mutex> lock(mutex_);
     WebMonitorHealth health = pipeServer_.IsRunning() ? WebMonitorHealth::Normal : WebMonitorHealth::Error;
     std::wstring diagnosticMessage = pipeServer_.LastError();
+    const int64_t nowMs = CurrentTimeMs();
 
     if (enabled_ && nativeHostRegistered_ && pipeServer_.IsRunning()) {
         if (pipeServer_.ConnectedClientCount() == 0) {
@@ -136,6 +141,31 @@ void WebSourceController::PollOnce()
             noClientPollCount_ = 0;
             reconnectAttempts_ = 0;
         }
+    }
+
+    const bool hasActiveWebTask = currentState_.runningCount > 0 || currentState_.waitingCount > 0;
+    const bool canRequestSnapshot =
+        enabled_ &&
+        pipeServer_.ConnectedClientCount() > 0 &&
+        !browserInstances_.empty();
+    const bool shouldRequestSnapshot =
+        hasActiveWebTask &&
+        canRequestSnapshot &&
+        (lastActiveSnapshotRequestAt_ == 0 ||
+            nowMs - lastActiveSnapshotRequestAt_ >= kActiveSnapshotConfirmIntervalMs);
+    if (shouldRequestSnapshot) {
+        pendingSnapshotCommands_.clear();
+        for (const std::string& browserInstanceId : browserInstances_) {
+            PendingSnapshotCommand command;
+            command.requestId = "snapshot-" + std::to_string(nextSnapshotRequestId_++);
+            command.browserInstanceId = browserInstanceId;
+            pendingSnapshotCommands_.push_back(command);
+        }
+        lastActiveSnapshotRequestAt_ = nowMs;
+        lastActiveSnapshotResult_ = "queued";
+        WebDebugLog::WriteUtf8(
+            L"WebSource",
+            "queue active snapshot count=" + std::to_string(pendingSnapshotCommands_.size()));
     }
 
     RefreshStateLocked(health, diagnosticMessage);
@@ -225,6 +255,9 @@ std::string WebSourceController::HandleParsedMessage(const JsonValue& root)
     if (type == "focus_tab_result") {
         return ApplyFocusTabResult(root);
     }
+    if (type == "request_snapshot_result") {
+        return ApplySnapshotResult(root);
+    }
     if (type == "snapshot_begin") {
         std::lock_guard<std::mutex> lock(mutex_);
         store_.ClearAll();
@@ -280,6 +313,18 @@ std::string WebSourceController::HandleExtensionHeartbeat(const JsonValue& root)
         return MakeAckWithFocusCommandLocked(command);
     }
 
+    for (auto iterator = pendingSnapshotCommands_.begin(); iterator != pendingSnapshotCommands_.end(); ++iterator) {
+        if (iterator->browserInstanceId != browserInstanceId) {
+            continue;
+        }
+
+        const PendingSnapshotCommand command = *iterator;
+        pendingSnapshotCommands_.erase(iterator);
+        lastActiveSnapshotResult_ = "dispatched";
+        WebDebugLog::WriteUtf8(L"WebSource", "dispatch request_snapshot request_id=" + command.requestId);
+        return MakeAckWithSnapshotCommandLocked(command);
+    }
+
     return Ack();
 }
 
@@ -321,6 +366,40 @@ std::string WebSourceController::ApplyFocusTabResult(const JsonValue& root)
     }
 
     RefreshStateLocked(WebMonitorHealth::Normal, L"");
+    return Ack();
+}
+
+std::string WebSourceController::ApplySnapshotResult(const JsonValue& root)
+{
+    std::string requestId;
+    if (!ReadRequiredString(root, "requestId", &requestId)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++protocolErrorCount_;
+        RefreshStateLocked(WebMonitorHealth::Degraded, L"invalid request_snapshot_result message");
+        return NativeHostProtocol::MakeProtocolError("invalid_request_snapshot_result");
+    }
+
+    bool ok = false;
+    ReadOptionalBool(root, "ok", &ok);
+
+    int checkedTabs = 0;
+    int updatedTabs = 0;
+    int failedTabs = 0;
+    ReadRequiredInt(root, "checkedTabs", &checkedTabs);
+    ReadRequiredInt(root, "updatedTabs", &updatedTabs);
+    ReadRequiredInt(root, "failedTabs", &failedTabs);
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::ostringstream result;
+    result
+        << (ok ? "ok" : "failed")
+        << " request_id=" << requestId
+        << " checked=" << checkedTabs
+        << " updated=" << updatedTabs
+        << " failed=" << failedTabs;
+    lastActiveSnapshotResult_ = result.str();
+    WebDebugLog::WriteUtf8(L"WebSource", "request_snapshot_result " + lastActiveSnapshotResult_);
+    RefreshStateLocked(ok ? WebMonitorHealth::Normal : WebMonitorHealth::Degraded, L"");
     return Ack();
 }
 
@@ -481,6 +560,8 @@ void WebSourceController::RefreshStateLocked(WebMonitorHealth health, const std:
     currentState_.nativeReconnectAttempts = reconnectAttempts_;
     currentState_.lastReason = store_.LastReason();
     currentState_.lastStateChangedAt = store_.LastStateChangedAt();
+    currentState_.lastActiveSnapshotRequestAt = lastActiveSnapshotRequestAt_;
+    currentState_.lastActiveSnapshotResult = lastActiveSnapshotResult_;
     currentState_.bridgeState = enabled_
         ? (pipeServer_.IsRunning() ? "listening" : "stopped")
         : "disabled";
@@ -496,6 +577,17 @@ std::string WebSourceController::MakeAckWithFocusCommandLocked(const PendingFocu
         << "\"requestId\":\"" << NativeHostProtocol::JsonEscape(command.requestId) << "\","
         << "\"tabId\":" << command.tabId << ","
         << "\"windowId\":" << command.windowId
+        << "}}";
+    return output.str();
+}
+
+std::string WebSourceController::MakeAckWithSnapshotCommandLocked(const PendingSnapshotCommand& command) const
+{
+    std::ostringstream output;
+    output
+        << "{\"type\":\"ack\",\"command\":{"
+        << "\"type\":\"request_snapshot\","
+        << "\"requestId\":\"" << NativeHostProtocol::JsonEscape(command.requestId) << "\""
         << "}}";
     return output.str();
 }

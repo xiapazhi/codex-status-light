@@ -324,14 +324,14 @@ bool TrayApp::HandleContextMenuCommand(UINT command, bool* keepMenuOpen)
         }
         return true;
     case kMenuFireworkHeightNormal:
-        celebrationController_.SetLaunchHeightPercent(100);
+        celebrationController_.SetLaunchHeightPercent(125);
         celebrationController_.PlayTestDot();
         if (keepMenuOpen != nullptr) {
             *keepMenuOpen = true;
         }
         return true;
     case kMenuFireworkHeightHigh:
-        celebrationController_.SetLaunchHeightPercent(220);
+        celebrationController_.SetLaunchHeightPercent(250);
         celebrationController_.PlayTestDot();
         if (keepMenuOpen != nullptr) {
             *keepMenuOpen = true;
@@ -676,12 +676,12 @@ HMENU TrayApp::CreateFireworksMenu()
     AppendMenuW(fireworksMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(
         fireworksMenu,
-        MF_STRING | (selectedHeightPercent == 100 ? MF_CHECKED : MF_UNCHECKED),
+        MF_STRING | (selectedHeightPercent == 125 ? MF_CHECKED : MF_UNCHECKED),
         kMenuFireworkHeightNormal,
         L"高度：标准");
     AppendMenuW(
         fireworksMenu,
-        MF_STRING | (selectedHeightPercent == 220 ? MF_CHECKED : MF_UNCHECKED),
+        MF_STRING | (selectedHeightPercent == 250 ? MF_CHECKED : MF_UNCHECKED),
         kMenuFireworkHeightHigh,
         L"高度：高");
     AppendMenuW(

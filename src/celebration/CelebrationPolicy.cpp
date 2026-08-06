@@ -27,8 +27,14 @@ const wchar_t* kBurstSizePercentValue = L"FireworkBurstSizePercent";
 
 uint32_t NormalizeLaunchHeightPercent(DWORD value)
 {
-    if (value == 100 || value == 220 || value == 500) {
+    if (value == 125 || value == 250 || value == 500) {
         return static_cast<uint32_t>(value);
+    }
+    if (value == 100) {
+        return 125;
+    }
+    if (value == 220) {
+        return 250;
     }
     return kDefaultFireworkLaunchHeightPercent;
 }
