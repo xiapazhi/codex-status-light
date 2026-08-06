@@ -58,9 +58,17 @@ private:
         Running
     };
 
+    enum class PromptOutcome {
+        None,
+        Success,
+        Failed,
+        Cancelled
+    };
+
     struct PromptItem {
         PromptSource source = PromptSource::App;
         PromptStage stage = PromptStage::Running;
+        PromptOutcome outcome = PromptOutcome::None;
         std::string stableId;
         std::string openKey;
         int64_t changedAtMs = 0;
@@ -90,6 +98,7 @@ private:
     void RefreshState();
     void StartOrRecoverWatcher();
     void UpdateTrayIcon();
+    void UpdateCelebration(const AggregateSnapshot& aggregate);
     void UpdateVisualTiming(const AggregateSnapshot& aggregate);
     void ShowContextMenu();
     void OpenCodex();
@@ -106,6 +115,8 @@ private:
     std::string AppPromptStableId(const SessionState& session) const;
     std::string BrowserPromptStableId(const WebConversationRecord& conversation) const;
     int PromptPriority(PromptStage stage) const;
+    CelebrationVisualState CelebrationVisual(const AggregateSnapshot& aggregate) const;
+    void CollectSuccessfulCompletionIds(std::set<std::string>* ids) const;
     IconKey BuildIconKey(const AggregateSnapshot& aggregate) const;
     std::wstring BuildTooltip(const AggregateSnapshot& aggregate) const;
     std::wstring BuildDiagnostics(const AggregateSnapshot& aggregate) const;
@@ -137,6 +148,9 @@ private:
     ULONGLONG lastWebPollTick_ = 0;
     ULONGLONG visualSinceTick_ = 0;
     AggregateVisual lastVisual_ = AggregateVisual::Completed;
+    CelebrationVisualState lastCelebrationVisual_ = CelebrationVisualState::Completed;
     std::string lastPromptStableId_;
+    std::set<std::string> seenSuccessfulCompletionIds_;
     bool blinkOn_ = true;
+    bool celebrationBaselineReady_ = false;
 };

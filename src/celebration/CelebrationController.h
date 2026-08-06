@@ -30,6 +30,7 @@ class CelebrationController {
 public:
     bool Initialize(HINSTANCE instance, HWND mainWindow, UINT trayIconId);
     void Shutdown();
+    void OnAggregateTransition(const AggregateTransition& transition);
     void PlayTestDot();
     void OnTimer();
     bool IsTimerRunning() const noexcept;
@@ -53,4 +54,5 @@ private:
     ULONGLONG animationStartedTick_ = 0;
     UINT retryIndex_ = 0;
     bool timerRunning_ = false;
+    bool pendingSuccessfulCompletion_ = false;
 };

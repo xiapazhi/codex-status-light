@@ -44,6 +44,28 @@ void CelebrationController::Shutdown()
     diagnostics_.active = false;
 }
 
+void CelebrationController::OnAggregateTransition(const AggregateTransition& transition)
+{
+    if (transition.newSuccessCount > 0) {
+        pendingSuccessfulCompletion_ = true;
+    }
+
+    const bool enteredCompleted =
+        transition.previousVisual != CelebrationVisualState::Completed &&
+        transition.currentVisual == CelebrationVisualState::Completed;
+    const bool observedFastSuccessAtRest =
+        transition.currentVisual == CelebrationVisualState::Completed &&
+        transition.newSuccessCount > 0 &&
+        transition.waitingCount == 0 &&
+        transition.runningCount == 0;
+    if ((!enteredCompleted && !observedFastSuccessAtRest) || !pendingSuccessfulCompletion_) {
+        return;
+    }
+
+    pendingSuccessfulCompletion_ = false;
+    PlayTestDot();
+}
+
 void CelebrationController::PlayTestDot()
 {
     retryIndex_ = 0;

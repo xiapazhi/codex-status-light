@@ -16,6 +16,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <random>
 
@@ -24,6 +25,24 @@ enum class LaunchDirection {
     Down,
     Left,
     Right
+};
+
+enum class CelebrationVisualState {
+    Waiting,
+    Running,
+    Completed
+};
+
+struct AggregateTransition {
+    CelebrationVisualState previousVisual = CelebrationVisualState::Completed;
+    CelebrationVisualState currentVisual = CelebrationVisualState::Completed;
+    uint32_t newSuccessCount = 0;
+    uint32_t newFailedCount = 0;
+    uint32_t newCancelledCount = 0;
+    uint32_t waitingCount = 0;
+    uint32_t runningCount = 0;
+    uint32_t completedCount = 0;
+    std::chrono::steady_clock::time_point occurredAt;
 };
 
 struct Vec2 {

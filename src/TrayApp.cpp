@@ -338,6 +338,7 @@ void TrayApp::UpdateTrayIcon()
     }
 
     const AggregateSnapshot aggregate = AggregateSessions();
+    UpdateCelebration(aggregate);
     UpdateVisualTiming(aggregate);
     notifyData_.hIcon = iconRenderer_.GetIcon(BuildIconKey(aggregate));
 
@@ -345,6 +346,41 @@ void TrayApp::UpdateTrayIcon()
     wcsncpy_s(notifyData_.szTip, _countof(notifyData_.szTip), tooltip.c_str(), _TRUNCATE);
     notifyData_.uFlags = NIF_ICON | NIF_TIP;
     Shell_NotifyIconW(NIM_MODIFY, &notifyData_);
+}
+
+void TrayApp::UpdateCelebration(const AggregateSnapshot& aggregate)
+{
+    std::set<std::string> currentSuccessIds;
+    CollectSuccessfulCompletionIds(&currentSuccessIds);
+
+    const CelebrationVisualState currentVisual = CelebrationVisual(aggregate);
+    if (!celebrationBaselineReady_) {
+        seenSuccessfulCompletionIds_ = currentSuccessIds;
+        lastCelebrationVisual_ = currentVisual;
+        celebrationBaselineReady_ = true;
+        return;
+    }
+
+    uint32_t newSuccessCount = 0;
+    for (const std::string& id : currentSuccessIds) {
+        if (seenSuccessfulCompletionIds_.find(id) == seenSuccessfulCompletionIds_.end()) {
+            ++newSuccessCount;
+        }
+    }
+    seenSuccessfulCompletionIds_.insert(currentSuccessIds.begin(), currentSuccessIds.end());
+
+    AggregateTransition transition;
+    transition.previousVisual = lastCelebrationVisual_;
+    transition.currentVisual = currentVisual;
+    transition.newSuccessCount = newSuccessCount;
+    transition.waitingCount = static_cast<uint32_t>(aggregate.waitingCount);
+    transition.runningCount = static_cast<uint32_t>(aggregate.runningCount);
+    transition.completedCount = static_cast<uint32_t>(
+        aggregate.completedCount + aggregate.failedCount + aggregate.cancelledCount);
+    transition.occurredAt = std::chrono::steady_clock::now();
+
+    lastCelebrationVisual_ = currentVisual;
+    celebrationController_.OnAggregateTransition(transition);
 }
 
 void TrayApp::UpdateVisualTiming(const AggregateSnapshot& aggregate)
@@ -544,7 +580,13 @@ TrayApp::AggregateSnapshot TrayApp::AggregateSessions() const
         if (item.stage == PromptStage::Waiting) {
             ++aggregate.waitingCount;
         } else if (item.stage == PromptStage::Completed) {
-            ++aggregate.completedCount;
+            if (item.outcome == PromptOutcome::Failed) {
+                ++aggregate.failedCount;
+            } else if (item.outcome == PromptOutcome::Cancelled) {
+                ++aggregate.cancelledCount;
+            } else {
+                ++aggregate.completedCount;
+            }
         } else if (item.stage == PromptStage::Running) {
             ++aggregate.runningCount;
         }
@@ -600,6 +642,13 @@ void TrayApp::AppendAppPromptItems(std::vector<PromptItem>* items) const
             session.state == TaskState::Failed ||
             session.state == TaskState::Cancelled) {
             prompt.stage = PromptStage::Completed;
+            if (session.state == TaskState::Failed) {
+                prompt.outcome = PromptOutcome::Failed;
+            } else if (session.state == TaskState::Cancelled) {
+                prompt.outcome = PromptOutcome::Cancelled;
+            } else {
+                prompt.outcome = PromptOutcome::Success;
+            }
             prompt.stableId = AppPromptStableId(session);
             if (acknowledgedCompletedPromptIds_.find(prompt.stableId) == acknowledgedCompletedPromptIds_.end()) {
                 items->push_back(prompt);
@@ -635,6 +684,13 @@ void TrayApp::AppendBrowserPromptItems(std::vector<PromptItem>* items) const
             conversation.state == WebConversationState::TerminalFailed ||
             conversation.state == WebConversationState::TerminalCancelled) {
             prompt.stage = PromptStage::Completed;
+            if (conversation.state == WebConversationState::TerminalFailed) {
+                prompt.outcome = PromptOutcome::Failed;
+            } else if (conversation.state == WebConversationState::TerminalCancelled) {
+                prompt.outcome = PromptOutcome::Cancelled;
+            } else {
+                prompt.outcome = PromptOutcome::Success;
+            }
             prompt.stableId = BrowserPromptStableId(conversation);
             if (acknowledgedCompletedPromptIds_.find(prompt.stableId) == acknowledgedCompletedPromptIds_.end()) {
                 items->push_back(prompt);
@@ -692,6 +748,34 @@ int TrayApp::PromptPriority(PromptStage stage) const
         return 2;
     }
     return 1;
+}
+
+CelebrationVisualState TrayApp::CelebrationVisual(const AggregateSnapshot& aggregate) const
+{
+    if (aggregate.waitingCount > 0) {
+        return CelebrationVisualState::Waiting;
+    }
+    if (aggregate.runningCount > 0) {
+        return CelebrationVisualState::Running;
+    }
+    return CelebrationVisualState::Completed;
+}
+
+void TrayApp::CollectSuccessfulCompletionIds(std::set<std::string>* ids) const
+{
+    for (const auto& item : snapshot_.sessions) {
+        const SessionState& session = item.second;
+        if (session.state == TaskState::Completed) {
+            ids->insert(AppPromptStableId(session));
+        }
+    }
+
+    const WebAccountState webState = webMonitor_.CurrentState();
+    for (const WebConversationRecord& conversation : webState.conversations) {
+        if (conversation.state == WebConversationState::TerminalSuccess) {
+            ids->insert(BrowserPromptStableId(conversation));
+        }
+    }
 }
 
 IconKey TrayApp::BuildIconKey(const AggregateSnapshot& aggregate) const
@@ -959,6 +1043,7 @@ bool TrayApp::HasUserVisibleTask(const AggregateSnapshot& aggregate) const
         aggregate.runningCount > 0 ||
         aggregate.completedCount > 0 ||
         aggregate.failedCount > 0 ||
+        aggregate.cancelledCount > 0 ||
         aggregate.staleCount > 0 ||
         aggregate.unknownCount > 0;
 }
