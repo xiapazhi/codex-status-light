@@ -96,6 +96,8 @@ void WebSourceController::Disable()
     observerIdByFocusRequest_.clear();
     pendingFocusCommands_.clear();
     pendingSnapshotCommands_.clear();
+    activeSnapshotObserverIds_.clear();
+    activeSnapshotBrowserInstanceId_.clear();
     lastSequenceByObserver_.clear();
     reconnectAttempts_ = 0;
     noClientPollCount_ = 0;
@@ -255,6 +257,9 @@ std::string WebSourceController::HandleParsedMessage(const JsonValue& root)
     if (type == "focus_tab_result") {
         return ApplyFocusTabResult(root);
     }
+    if (type == "request_snapshot_begin") {
+        return ApplySnapshotBegin(root);
+    }
     if (type == "request_snapshot_result") {
         return ApplySnapshotResult(root);
     }
@@ -320,11 +325,32 @@ std::string WebSourceController::HandleExtensionHeartbeat(const JsonValue& root)
 
         const PendingSnapshotCommand command = *iterator;
         pendingSnapshotCommands_.erase(iterator);
+        activeSnapshotBrowserInstanceId_ = browserInstanceId;
+        activeSnapshotObserverIds_.clear();
         lastActiveSnapshotResult_ = "dispatched";
         WebDebugLog::WriteUtf8(L"WebSource", "dispatch request_snapshot request_id=" + command.requestId);
         return MakeAckWithSnapshotCommandLocked(command);
     }
 
+    return Ack();
+}
+
+std::string WebSourceController::ApplySnapshotBegin(const JsonValue& root)
+{
+    std::string browserInstanceId;
+    if (!ReadRequiredString(root, "browserInstanceId", &browserInstanceId)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++protocolErrorCount_;
+        RefreshStateLocked(WebMonitorHealth::Degraded, L"invalid request_snapshot_begin message");
+        return NativeHostProtocol::MakeProtocolError("invalid_request_snapshot_begin");
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    activeSnapshotBrowserInstanceId_ = browserInstanceId;
+    activeSnapshotObserverIds_.clear();
+    lastActiveSnapshotResult_ = "collecting";
+    WebDebugLog::WriteUtf8(L"WebSource", "request_snapshot_begin browser=" + browserInstanceId);
+    RefreshStateLocked(WebMonitorHealth::Normal, L"");
     return Ack();
 }
 
@@ -385,11 +411,19 @@ std::string WebSourceController::ApplySnapshotResult(const JsonValue& root)
     int checkedTabs = 0;
     int updatedTabs = 0;
     int failedTabs = 0;
+    std::string browserInstanceId;
     ReadRequiredInt(root, "checkedTabs", &checkedTabs);
     ReadRequiredInt(root, "updatedTabs", &updatedTabs);
     ReadRequiredInt(root, "failedTabs", &failedTabs);
+    ReadRequiredString(root, "browserInstanceId", &browserInstanceId);
+    if (browserInstanceId.empty()) {
+        browserInstanceId = activeSnapshotBrowserInstanceId_;
+    }
 
     std::lock_guard<std::mutex> lock(mutex_);
+    if (!browserInstanceId.empty()) {
+        RemoveMissingSnapshotObserversLocked(browserInstanceId);
+    }
     std::ostringstream result;
     result
         << (ok ? "ok" : "failed")
@@ -397,6 +431,9 @@ std::string WebSourceController::ApplySnapshotResult(const JsonValue& root)
         << " checked=" << checkedTabs
         << " updated=" << updatedTabs
         << " failed=" << failedTabs;
+    if (activeSnapshotObserverIds_.empty()) {
+        activeSnapshotBrowserInstanceId_.clear();
+    }
     lastActiveSnapshotResult_ = result.str();
     WebDebugLog::WriteUtf8(L"WebSource", "request_snapshot_result " + lastActiveSnapshotResult_);
     RefreshStateLocked(ok ? WebMonitorHealth::Normal : WebMonitorHealth::Degraded, L"");
@@ -478,6 +515,9 @@ std::string WebSourceController::ApplyTabState(const JsonValue& root)
     browserInstances_.insert(browserInstanceId);
     observersByTab_[TabKey(browserInstanceId, tabId)].insert(record.observerId);
     store_.ApplyObservation(record);
+    if (activeSnapshotBrowserInstanceId_ == browserInstanceId) {
+        activeSnapshotObserverIds_.insert(record.observerId);
+    }
     RefreshStateLocked(WebMonitorHealth::Normal, L"");
     std::wostringstream output;
     output
@@ -587,9 +627,62 @@ std::string WebSourceController::MakeAckWithSnapshotCommandLocked(const PendingS
     output
         << "{\"type\":\"ack\",\"command\":{"
         << "\"type\":\"request_snapshot\","
-        << "\"requestId\":\"" << NativeHostProtocol::JsonEscape(command.requestId) << "\""
+        << "\"requestId\":\"" << NativeHostProtocol::JsonEscape(command.requestId) << "\","
+        << "\"browserInstanceId\":\"" << NativeHostProtocol::JsonEscape(command.browserInstanceId) << "\""
         << "}}";
     return output.str();
+}
+
+void WebSourceController::RemoveMissingSnapshotObserversLocked(const std::string& browserInstanceId)
+{
+    if (activeSnapshotBrowserInstanceId_ != browserInstanceId) {
+        return;
+    }
+
+    std::set<std::string> retainedObserverIds = activeSnapshotObserverIds_;
+    const std::string tabKeyPrefix = browserInstanceId + ":tab:";
+    for (const auto& item : observersByTab_) {
+        const bool belongsToSnapshotBrowser = item.first.find(tabKeyPrefix) == 0;
+        if (belongsToSnapshotBrowser) {
+            continue;
+        }
+        retainedObserverIds.insert(item.second.begin(), item.second.end());
+    }
+
+    store_.RemoveMissingObservers(retainedObserverIds);
+
+    size_t removedCount = 0;
+    for (auto iterator = observersByTab_.begin(); iterator != observersByTab_.end();) {
+        const bool belongsToSnapshotBrowser = iterator->first.find(tabKeyPrefix) == 0;
+        if (!belongsToSnapshotBrowser) {
+            ++iterator;
+            continue;
+        }
+
+        for (auto observer = iterator->second.begin(); observer != iterator->second.end();) {
+            if (activeSnapshotObserverIds_.find(*observer) == activeSnapshotObserverIds_.end()) {
+                lastSequenceByObserver_.erase(*observer);
+                observer = iterator->second.erase(observer);
+                ++removedCount;
+            } else {
+                ++observer;
+            }
+        }
+
+        if (iterator->second.empty()) {
+            iterator = observersByTab_.erase(iterator);
+        } else {
+            ++iterator;
+        }
+    }
+
+    WebDebugLog::WriteUtf8(
+        L"WebSource",
+        "request_snapshot_cleanup browser=" + browserInstanceId +
+        " observed=" + std::to_string(activeSnapshotObserverIds_.size()) +
+        " removed=" + std::to_string(removedCount));
+    activeSnapshotObserverIds_.clear();
+    activeSnapshotBrowserInstanceId_.clear();
 }
 
 bool WebSourceController::ReadRequiredString(const JsonValue& root, const std::string& name, std::string* value)

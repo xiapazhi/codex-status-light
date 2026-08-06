@@ -557,11 +557,17 @@ async function executeFocusCommand(command) {
 
 async function executeSnapshotCommand(command) {
   const requestId = command.requestId || ''
+  const browserInstanceId = command.browserInstanceId || await getBrowserInstanceId()
   let checkedTabs = 0
   let updatedTabs = 0
   let failedTabs = 0
 
   try {
+    postToNative(makeMessage('request_snapshot_begin', {
+      requestId,
+      browserInstanceId,
+    }))
+
     const tabs = await chrome.tabs.query({ url: CHATGPT_URL_PATTERN })
     checkedTabs = tabs.length
 
@@ -590,8 +596,13 @@ async function executeSnapshotCommand(command) {
       }
     }
 
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250)
+    })
+
     postToNative(makeMessage('request_snapshot_result', {
       requestId,
+      browserInstanceId,
       ok: failedTabs === 0,
       checkedTabs,
       updatedTabs,
@@ -605,6 +616,7 @@ async function executeSnapshotCommand(command) {
   } catch (error) {
     postToNative(makeMessage('request_snapshot_result', {
       requestId,
+      browserInstanceId,
       ok: false,
       checkedTabs,
       updatedTabs,

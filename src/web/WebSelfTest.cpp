@@ -309,6 +309,17 @@ int WebSelfTest::Run()
     state = aggregator.Aggregate(editStore.Conversations(), 1, 1, editStore.ObserverCount(), 0, WebMonitorHealth::Normal);
     ok = Expect(state.completedCount == 1, "P7 running then idle creates successful completion") && ok;
 
+    ChatGptConversationStore snapshotCleanupStore;
+    const std::string staleKey = snapshotCleanupStore.BuildConversationKey(browserInstanceId, conversationOne, 8, "doc-stale");
+    const std::string currentKey = snapshotCleanupStore.BuildConversationKey(browserInstanceId, conversationTwo, 9, "doc-current");
+    snapshotCleanupStore.ApplyObservation(MakeObserver("stale-running-tab", staleKey, WebObservedPageState::Running, 1000, "visible-stop-control"));
+    snapshotCleanupStore.ApplyObservation(MakeObserver("current-idle-tab", currentKey, WebObservedPageState::Idle, 5000, "snapshot-idle"));
+    snapshotCleanupStore.RemoveMissingObservers(std::set<std::string> { "current-idle-tab" });
+    state = aggregator.Aggregate(snapshotCleanupStore.Conversations(), 1, 1, snapshotCleanupStore.ObserverCount(), 0, WebMonitorHealth::Normal);
+    ok = Expect(
+        state.runningCount == 0 && state.waitingCount == 0,
+        "P8 active snapshot cleanup removes stale running observer") && ok;
+
     std::cout << "P0 self-check: Native Messaging data model and bridge aggregation compiled\n";
     std::cout << "P1 self-check: extension observer identity model compiled\n";
     std::cout << "P3 self-check: state classification invariants verified\n";
