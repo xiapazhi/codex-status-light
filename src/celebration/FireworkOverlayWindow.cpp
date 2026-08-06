@@ -150,6 +150,8 @@ LRESULT CALLBACK FireworkOverlayWindow::WindowProc(HWND hwnd, UINT message, WPAR
         return HTTRANSPARENT;
     case WM_ERASEBKGND:
         return 1;
+    case WM_DPICHANGED:
+        return 0;
     case WM_DESTROY:
         return 0;
     default:

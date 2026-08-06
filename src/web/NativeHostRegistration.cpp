@@ -75,12 +75,54 @@ bool NativeHostRegistration::EnsureRegistered(std::wstring* errorMessage) const
         return false;
     }
     if (!WriteRegistry(manifestPath, errorMessage)) {
+        if (ExistingRegistryMatches(manifestPath)) {
+            WebDebugLog::Write(L"Registration", L"ok existing hkcu native_messaging_host manifest=" + manifestPath);
+            return true;
+        }
         WebDebugLog::Write(L"Registration", L"failed write hkcu native_messaging_host");
         return false;
     }
 
     WebDebugLog::Write(L"Registration", L"ok manifest=" + manifestPath + L" exe=" + exePath);
     return true;
+}
+
+bool NativeHostRegistration::ExistingRegistryMatches(const std::wstring& manifestPath) const
+{
+    const std::wstring keyPath =
+        L"Software\\Google\\Chrome\\NativeMessagingHosts\\com.statuslight.web";
+
+    HKEY key = nullptr;
+    const LONG openResult = RegOpenKeyExW(
+        HKEY_CURRENT_USER,
+        keyPath.c_str(),
+        0,
+        KEY_QUERY_VALUE,
+        &key);
+    if (openResult != ERROR_SUCCESS) {
+        return false;
+    }
+
+    wchar_t registeredPath[MAX_PATH] {};
+    DWORD registeredPathSize = sizeof(registeredPath);
+    const LONG readResult = RegQueryValueExW(
+        key,
+        nullptr,
+        nullptr,
+        nullptr,
+        reinterpret_cast<LPBYTE>(registeredPath),
+        &registeredPathSize);
+    RegCloseKey(key);
+
+    if (readResult != ERROR_SUCCESS || registeredPath[0] == L'\0') {
+        return false;
+    }
+    if (manifestPath != registeredPath) {
+        return false;
+    }
+
+    const DWORD attributes = GetFileAttributesW(registeredPath);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
 std::wstring NativeHostRegistration::ManifestPath() const

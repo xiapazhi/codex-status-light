@@ -26,4 +26,5 @@ private:
     bool EnsureDirectory(const std::wstring& path, std::wstring* errorMessage) const;
     bool WriteManifest(const std::wstring& manifestPath, const std::wstring& exePath, std::wstring* errorMessage) const;
     bool WriteRegistry(const std::wstring& manifestPath, std::wstring* errorMessage) const;
+    bool ExistingRegistryMatches(const std::wstring& manifestPath) const;
 };

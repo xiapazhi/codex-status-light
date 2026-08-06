@@ -145,6 +145,21 @@ inline float EaseOutCubic(float t)
     return 1.0f - inverse * inverse * inverse;
 }
 
+inline float EaseOutQuart(float t)
+{
+    const float inverse = 1.0f - Clamp01(t);
+    return 1.0f - inverse * inverse * inverse * inverse;
+}
+
+inline float SmoothStep(float edge0, float edge1, float value)
+{
+    if (edge0 == edge1) {
+        return value < edge0 ? 0.0f : 1.0f;
+    }
+    const float t = Clamp01((value - edge0) / (edge1 - edge0));
+    return t * t * (3.0f - 2.0f * t);
+}
+
 class Random {
 public:
     explicit Random(uint64_t seed)
@@ -162,6 +177,11 @@ public:
     {
         std::uniform_int_distribution<int> distribution(minimum, maximum);
         return distribution(engine_);
+    }
+
+    bool Chance(float probability)
+    {
+        return Range(0.0f, 1.0f) < Clamp01(probability);
     }
 
 private:

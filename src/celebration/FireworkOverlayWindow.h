@@ -2,8 +2,8 @@
  * 文件作用：声明完成烟花透明覆盖窗口
  * 职责范围：
  * 1. 创建不激活、鼠标穿透、任务栏不可见的 layered window
- * 2. 管理 32 位 BGRA DIB 绘制表面
- * 3. P0 阶段绘制一个柔和测试圆点并提交到 UpdateLayeredWindow
+ * 2. 显示、移动和隐藏透明覆盖窗口
+ * 3. 将 renderer 生成的 DIB 提交到 UpdateLayeredWindow
  *
  * 不负责：
  * - 决定烟花是否允许播放
