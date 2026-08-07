@@ -434,9 +434,13 @@ std::string WebSourceController::ApplySnapshotResult(const JsonValue& root)
     if (activeSnapshotObserverIds_.empty()) {
         activeSnapshotBrowserInstanceId_.clear();
     }
-    lastActiveSnapshotResult_ = result.str();
-    WebDebugLog::WriteUtf8(L"WebSource", "request_snapshot_result " + lastActiveSnapshotResult_);
     RefreshStateLocked(ok ? WebMonitorHealth::Normal : WebMonitorHealth::Degraded, L"");
+    lastActiveSnapshotResult_ = result.str();
+    currentState_.lastActiveSnapshotResult = lastActiveSnapshotResult_;
+    WebDebugLog::WriteUtf8(
+        L"WebSource",
+        "request_snapshot_result " + lastActiveSnapshotResult_ +
+        " active=" + ActiveConversationSummaryLocked());
     return Ack();
 }
 
@@ -526,7 +530,8 @@ std::string WebSourceController::ApplyTabState(const JsonValue& root)
         << L" tab_id=" << tabId
         << L" running=" << currentState_.runningCount
         << L" waiting=" << currentState_.waitingCount
-        << L" completed=" << currentState_.completedCount;
+        << L" completed=" << currentState_.completedCount
+        << L" active=" << NativeHostProtocol::Utf8ToWide(ActiveConversationSummaryLocked());
     WebDebugLog::Write(L"WebSource", output.str());
     return Ack();
 }
@@ -639,17 +644,10 @@ void WebSourceController::RemoveMissingSnapshotObserversLocked(const std::string
         return;
     }
 
-    std::set<std::string> retainedObserverIds = activeSnapshotObserverIds_;
     const std::string tabKeyPrefix = browserInstanceId + ":tab:";
-    for (const auto& item : observersByTab_) {
-        const bool belongsToSnapshotBrowser = item.first.find(tabKeyPrefix) == 0;
-        if (belongsToSnapshotBrowser) {
-            continue;
-        }
-        retainedObserverIds.insert(item.second.begin(), item.second.end());
-    }
-
-    store_.RemoveMissingObservers(retainedObserverIds);
+    const size_t storeRemovedCount = store_.RemoveMissingObserversForBrowser(
+        browserInstanceId,
+        activeSnapshotObserverIds_);
 
     size_t removedCount = 0;
     for (auto iterator = observersByTab_.begin(); iterator != observersByTab_.end();) {
@@ -680,9 +678,50 @@ void WebSourceController::RemoveMissingSnapshotObserversLocked(const std::string
         L"WebSource",
         "request_snapshot_cleanup browser=" + browserInstanceId +
         " observed=" + std::to_string(activeSnapshotObserverIds_.size()) +
-        " removed=" + std::to_string(removedCount));
+        " removed=" + std::to_string(removedCount) +
+        " store_removed=" + std::to_string(storeRemovedCount));
     activeSnapshotObserverIds_.clear();
     activeSnapshotBrowserInstanceId_.clear();
+}
+
+std::string WebSourceController::ActiveConversationSummaryLocked() const
+{
+    std::ostringstream output;
+    size_t emitted = 0;
+    for (const WebConversationRecord& conversation : currentState_.conversations) {
+        if (conversation.state != WebConversationState::Running &&
+            conversation.state != WebConversationState::WaitingInput &&
+            conversation.state != WebConversationState::TerminalSuccess) {
+            continue;
+        }
+
+        if (emitted > 0) {
+            output << ",";
+        }
+        if (conversation.state == WebConversationState::Running) {
+            output << "running";
+        } else if (conversation.state == WebConversationState::WaitingInput) {
+            output << "waiting";
+        } else {
+            output << "completed";
+        }
+        output
+            << "{key=" << NativeHostProtocol::JsonEscape(conversation.conversationKey)
+            << ";owner=" << NativeHostProtocol::JsonEscape(conversation.activeOwnerObserverId)
+            << ";observers=" << conversation.observerIds.size()
+            << ";gen=" << conversation.operationGeneration
+            << "}";
+        ++emitted;
+        if (emitted >= 4) {
+            output << ",...";
+            break;
+        }
+    }
+
+    if (emitted == 0) {
+        return "none";
+    }
+    return output.str();
 }
 
 bool WebSourceController::ReadRequiredString(const JsonValue& root, const std::string& name, std::string* value)

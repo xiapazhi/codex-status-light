@@ -137,6 +137,26 @@ void ChatGptConversationStore::RemoveMissingObservers(const std::set<std::string
     }
 }
 
+size_t ChatGptConversationStore::RemoveMissingObserversForBrowser(
+    const std::string& browserInstanceId,
+    const std::set<std::string>& currentObserverIds)
+{
+    size_t removedCount = 0;
+    std::set<std::string> retainedObserverIds;
+    for (const auto& item : observersById_) {
+        const bool belongsToBrowser = item.second.browserInstanceId == browserInstanceId;
+        const bool observedInSnapshot = currentObserverIds.find(item.first) != currentObserverIds.end();
+        if (!belongsToBrowser || observedInSnapshot) {
+            retainedObserverIds.insert(item.first);
+            continue;
+        }
+        ++removedCount;
+    }
+
+    RemoveMissingObservers(retainedObserverIds);
+    return removedCount;
+}
+
 void ChatGptConversationStore::RemoveObserver(const std::string& observerId)
 {
     std::set<std::string> currentObserverIds;

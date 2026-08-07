@@ -35,6 +35,7 @@ PageObserverRecord MakeObserver(
 {
     PageObserverRecord record;
     record.observerId = observerId;
+    record.browserInstanceId = "browser-test";
     record.conversationKey = conversationKey;
     record.state = state;
     record.lastObservedAt = observedAt;
@@ -319,6 +320,52 @@ int WebSelfTest::Run()
     ok = Expect(
         state.runningCount == 0 && state.waitingCount == 0,
         "P8 active snapshot cleanup removes stale running observer") && ok;
+
+    ChatGptConversationStore browserSnapshotStore;
+    const std::string sameBrowserOldKey = browserSnapshotStore.BuildConversationKey(
+        browserInstanceId,
+        conversationOne,
+        10,
+        "doc-old");
+    const std::string sameBrowserCurrentKey = browserSnapshotStore.BuildConversationKey(
+        browserInstanceId,
+        conversationTwo,
+        11,
+        "doc-current");
+    browserSnapshotStore.ApplyObservation(MakeObserver(
+        "same-browser-old-running",
+        sameBrowserOldKey,
+        WebObservedPageState::Running,
+        1000,
+        "visible-stop-control"));
+    browserSnapshotStore.ApplyObservation(MakeObserver(
+        "same-browser-current-idle",
+        sameBrowserCurrentKey,
+        WebObservedPageState::Idle,
+        5000,
+        "snapshot-idle"));
+
+    PageObserverRecord otherBrowser = MakeObserver(
+        "other-browser-running",
+        "browser-other:conversation:conversation-9",
+        WebObservedPageState::Running,
+        1200,
+        "visible-stop-control");
+    otherBrowser.browserInstanceId = "browser-other";
+    browserSnapshotStore.ApplyObservation(otherBrowser);
+
+    const size_t removedFromBrowser = browserSnapshotStore.RemoveMissingObserversForBrowser(
+        browserInstanceId,
+        std::set<std::string> { "same-browser-current-idle" });
+    state = aggregator.Aggregate(
+        browserSnapshotStore.Conversations(),
+        2,
+        2,
+        browserSnapshotStore.ObserverCount(),
+        0,
+        WebMonitorHealth::Normal);
+    ok = Expect(removedFromBrowser == 1, "P8 browser snapshot reports removed stale observer") && ok;
+    ok = Expect(state.runningCount == 1, "P8 browser snapshot keeps other browser observers") && ok;
 
     std::cout << "P0 self-check: Native Messaging data model and bridge aggregation compiled\n";
     std::cout << "P1 self-check: extension observer identity model compiled\n";

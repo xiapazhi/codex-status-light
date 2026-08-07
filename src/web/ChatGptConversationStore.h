@@ -35,6 +35,9 @@ public:
 
     void ApplyObservation(const PageObserverRecord& observer);
     void RemoveMissingObservers(const std::set<std::string>& currentObserverIds);
+    size_t RemoveMissingObserversForBrowser(
+        const std::string& browserInstanceId,
+        const std::set<std::string>& currentObserverIds);
     void RemoveObserver(const std::string& observerId);
     void ClearAll();
     std::vector<WebConversationRecord> Conversations() const;

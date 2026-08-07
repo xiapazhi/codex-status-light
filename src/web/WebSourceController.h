@@ -90,6 +90,7 @@ private:
     std::string MakeAckWithFocusCommandLocked(const PendingFocusCommand& command) const;
     std::string MakeAckWithSnapshotCommandLocked(const PendingSnapshotCommand& command) const;
     void RemoveMissingSnapshotObserversLocked(const std::string& browserInstanceId);
+    std::string ActiveConversationSummaryLocked() const;
     bool ReadRequiredString(const JsonValue& root, const std::string& name, std::string* value);
     bool ReadRequiredInt(const JsonValue& root, const std::string& name, int* value);
     bool ReadOptionalBool(const JsonValue& root, const std::string& name, bool* value);
