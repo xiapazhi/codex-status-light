@@ -14,6 +14,7 @@
  */
 #include "TrayApp.h"
 
+#include "AppVersion.h"
 #include "web/WebDebugLog.h"
 
 #include <Shellapi.h>
@@ -30,6 +31,7 @@ constexpr UINT kSourceChangedMessage = WM_APP + 2;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT_PTR kRefreshTimer = 1001;
 constexpr UINT_PTR kBlinkTimer = 1002;
+constexpr UINT_PTR kUpdateTimer = 1003;
 constexpr UINT_PTR kFireworkTimerId = 0x5346;
 constexpr UINT kMenuOpenCodex = 2001;
 constexpr UINT kMenuClearCompleted = 2002;
@@ -44,6 +46,8 @@ constexpr UINT kMenuFireworkHeightVeryHigh = 2010;
 constexpr UINT kMenuFireworkBurstNormal = 2011;
 constexpr UINT kMenuFireworkBurstLarge = 2012;
 constexpr UINT kMenuFireworkBurstVeryLarge = 2013;
+constexpr UINT kMenuCheckUpdate = 2014;
+constexpr UINT kMenuCopyUpdateStatus = 2015;
 constexpr ULONGLONG kCalibrationIntervalMs = 5000;
 constexpr ULONGLONG kStartupNoCodexGraceMs = 15000;
 constexpr ULONGLONG kRuntimeNoCodexGraceMs = 5000;
@@ -56,6 +60,7 @@ constexpr ULONGLONG kFastFlashIntervalMs = 125;
 constexpr ULONGLONG kRedFlashDurationMs = 3000;
 constexpr ULONGLONG kGreenFlashDurationMs = 1000;
 constexpr ULONGLONG kCompletedPromptVisibleMs = 3000;
+constexpr UINT kUpdateCheckIntervalMs = 6 * 60 * 60 * 1000;
 
 struct FindCodexWindowContext {
     HWND hwnd = nullptr;
@@ -211,9 +216,11 @@ int TrayApp::Run(HINSTANCE instance, const TrayOptions& options)
         return 2;
     }
     celebrationController_.Initialize(instance, hwnd_, kTrayIconId);
+    updater_.StartBackgroundCheck(false);
 
     SetTimer(hwnd_, kRefreshTimer, static_cast<UINT>(std::max(1, options_.pollSeconds) * 1000), nullptr);
     SetTimer(hwnd_, kBlinkTimer, kAnimationTimerMs, nullptr);
+    SetTimer(hwnd_, kUpdateTimer, kUpdateCheckIntervalMs, nullptr);
 
     MSG message {};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
@@ -249,6 +256,7 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
     case WM_TIMER:
         if (wParam == kFireworkTimerId) {
             app->celebrationController_.OnTimer();
+            app->ApplyReadyUpdateAfterManualCheck();
         } else if (wParam == kRefreshTimer) {
             app->processSnapshot_ = app->processMonitor_.ReadOnce();
             const ULONGLONG nowTick = GetTickCount64();
@@ -266,6 +274,9 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         } else if (wParam == kBlinkTimer) {
             app->blinkOn_ = !app->blinkOn_;
             app->UpdateTrayIcon();
+            app->ApplyReadyUpdateAfterManualCheck();
+        } else if (wParam == kUpdateTimer) {
+            app->updater_.StartBackgroundCheck(false);
         }
         return 0;
     case kSourceChangedMessage:
@@ -285,8 +296,13 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPA
         return 0;
     case WM_DESTROY:
         app->celebrationController_.Shutdown();
+        if (app->applyUpdateOnDestroy_) {
+            app->updater_.LaunchApplyHelperForCurrentProcess();
+        }
+        app->updater_.Shutdown();
         KillTimer(hwnd, kRefreshTimer);
         KillTimer(hwnd, kBlinkTimer);
+        KillTimer(hwnd, kUpdateTimer);
         app->RemoveTrayIcon();
         PostQuitMessage(0);
         return 0;
@@ -310,6 +326,16 @@ bool TrayApp::HandleContextMenuCommand(UINT command, bool* keepMenuOpen)
         return true;
     case kMenuCopyDiagnostics:
         CopyDiagnosticsToClipboard();
+        return true;
+    case kMenuCheckUpdate:
+        manualUpdateApplyPending_ = true;
+        waitingForUpdateFirework_ = false;
+        manualUpdateHadReadyAtStart_ = updater_.CurrentStatus().updateReady;
+        manualUpdateFireworkStarted_ = false;
+        updater_.StartBackgroundCheck(true);
+        return true;
+    case kMenuCopyUpdateStatus:
+        CopyUpdateStatusToClipboard();
         return true;
     case kMenuTestFirework:
         celebrationController_.PlayTestDot();
@@ -515,6 +541,8 @@ void TrayApp::UpdateTrayIcon()
     }
 
     const AggregateSnapshot aggregate = AggregateSessions();
+    const UpdateStatus updateStatus = updater_.CurrentStatus();
+    UpdateUpdaterCelebration(updateStatus);
     UpdateCelebration(aggregate);
     UpdateVisualTiming(aggregate);
     notifyData_.hIcon = iconRenderer_.GetIcon(BuildIconKey(aggregate));
@@ -558,6 +586,43 @@ void TrayApp::UpdateCelebration(const AggregateSnapshot& aggregate)
 
     lastCelebrationVisual_ = currentVisual;
     celebrationController_.OnAggregateTransition(transition);
+}
+
+void TrayApp::UpdateUpdaterCelebration(const UpdateStatus& updateStatus)
+{
+    const bool shouldPlayManualUpdateFirework =
+        manualUpdateApplyPending_ &&
+        !manualUpdateHadReadyAtStart_ &&
+        updateStatus.updateReady &&
+        !manualUpdateFireworkStarted_;
+
+    if (shouldPlayManualUpdateFirework) {
+        celebrationController_.PlayCompletionFirework();
+        manualUpdateFireworkStarted_ = true;
+        waitingForUpdateFirework_ = true;
+    }
+}
+
+void TrayApp::ApplyReadyUpdateAfterManualCheck()
+{
+    if (!manualUpdateApplyPending_ || !waitingForUpdateFirework_) {
+        return;
+    }
+    if (!updater_.CurrentStatus().updateReady) {
+        manualUpdateApplyPending_ = false;
+        waitingForUpdateFirework_ = false;
+        manualUpdateFireworkStarted_ = false;
+        return;
+    }
+    if (celebrationController_.IsTimerRunning()) {
+        return;
+    }
+
+    manualUpdateApplyPending_ = false;
+    waitingForUpdateFirework_ = false;
+    manualUpdateFireworkStarted_ = false;
+    applyUpdateOnDestroy_ = true;
+    DestroyWindow(hwnd_);
 }
 
 void TrayApp::UpdateVisualTiming(const AggregateSnapshot& aggregate)
@@ -651,8 +716,13 @@ HMENU TrayApp::CreateContextMenu()
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fireworksMenu), L"烟花效果");
     }
 
+    HMENU copyMenu = CreateCopyMenu();
+    if (copyMenu != nullptr) {
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(copyMenu), L"复制");
+    }
+
     AppendMenuW(menu, MF_STRING, kMenuClearCompleted, L"清除完成提示");
-    AppendMenuW(menu, MF_STRING, kMenuCopyDiagnostics, L"复制诊断信息");
+    AppendMenuW(menu, MF_STRING, kMenuCheckUpdate, L"检查更新");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kMenuExit, L"退出");
     return menu;
@@ -708,6 +778,18 @@ HMENU TrayApp::CreateFireworksMenu()
     return fireworksMenu;
 }
 
+HMENU TrayApp::CreateCopyMenu()
+{
+    HMENU copyMenu = CreatePopupMenu();
+    if (copyMenu == nullptr) {
+        return nullptr;
+    }
+
+    AppendMenuW(copyMenu, MF_STRING, kMenuCopyUpdateStatus, L"更新状态");
+    AppendMenuW(copyMenu, MF_STRING, kMenuCopyDiagnostics, L"诊断信息");
+    return copyMenu;
+}
+
 void TrayApp::OpenCodex()
 {
     if (ActivateCodexWindow()) {
@@ -752,21 +834,30 @@ void TrayApp::ClearCompletedPrompts()
 
 void TrayApp::CopyDiagnosticsToClipboard()
 {
-    const std::wstring diagnostics = BuildDiagnostics(AggregateSessions());
-    const size_t byteCount = (diagnostics.size() + 1) * sizeof(wchar_t);
+    CopyTextToClipboard(BuildDiagnostics(AggregateSessions()));
+}
+
+void TrayApp::CopyUpdateStatusToClipboard()
+{
+    CopyTextToClipboard(updater_.BuildDiagnostics());
+}
+
+void TrayApp::CopyTextToClipboard(const std::wstring& text)
+{
+    const size_t byteCount = (text.size() + 1) * sizeof(wchar_t);
 
     HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, byteCount);
     if (memory == nullptr) {
         return;
     }
 
-    void* lockedMemory = GlobalLock(memory);
-    if (lockedMemory == nullptr) {
+    void* target = GlobalLock(memory);
+    if (target == nullptr) {
         GlobalFree(memory);
         return;
     }
 
-    memcpy(lockedMemory, diagnostics.c_str(), byteCount);
+    std::memcpy(target, text.c_str(), byteCount);
     GlobalUnlock(memory);
 
     if (!OpenClipboard(hwnd_)) {
@@ -1116,6 +1207,28 @@ IconKey TrayApp::BuildIconKey(const AggregateSnapshot& aggregate) const
         }
     }
 
+    const UpdateStatus updateStatus = updater_.CurrentStatus();
+    const bool updaterIsVisible =
+        updateStatus.checkInProgress &&
+        aggregate.visual != AggregateVisual::Waiting;
+    if (updaterIsVisible) {
+        key.task = TaskVisual::Running;
+        key.blinkOn = true;
+
+        const ULONGLONG phaseMs = nowTick % kRunningBreathPeriodMs;
+        const ULONGLONG halfPeriodMs = kRunningBreathPeriodMs / 2;
+        const ULONGLONG risingMs = phaseMs <= halfPeriodMs ? phaseMs : kRunningBreathPeriodMs - phaseMs;
+        key.animationLevel = static_cast<int>(risingMs * 10 / halfPeriodMs);
+
+        if (updateStatus.downloadInProgress) {
+            key.updateProgressRing = true;
+            key.updateProgressBucket = static_cast<int>(updateStatus.downloadPercent / 5) * 5;
+        } else {
+            key.updateProgressRing = false;
+            key.updateProgressBucket = 0;
+        }
+    }
+
     return key;
 }
 
@@ -1136,6 +1249,15 @@ std::wstring TrayApp::BuildTooltip(const AggregateSnapshot& aggregate) const
     output << L"等待 " << aggregate.waitingCount
         << L"   运行 " << aggregate.runningCount
         << L"   完成 " << completedLikeCount << L"\n";
+
+    const UpdateStatus updateStatus = updater_.CurrentStatus();
+    if (updateStatus.downloadInProgress) {
+        output << L"更新 下载中 " << updateStatus.downloadPercent << L"%\n";
+    } else if (updateStatus.checkInProgress) {
+        output << L"更新 检查中\n";
+    } else if (updateStatus.updateReady) {
+        output << L"更新 已就绪\n";
+    }
 
     if (snapshot_.quota.validity == QuotaValidity::Unavailable ||
         snapshot_.quota.validity == QuotaValidity::Stale ||
@@ -1161,7 +1283,7 @@ std::wstring TrayApp::BuildTooltip(const AggregateSnapshot& aggregate) const
 std::wstring TrayApp::BuildDiagnostics(const AggregateSnapshot& aggregate) const
 {
     std::wostringstream output;
-    output << L"StatusLight: 0.3.0\n";
+    output << L"StatusLight: " << AppVersion::kStatusLightVersionWide << L"\n";
     output << L"Codex root: " << snapshot_.codexRoot << L"\n";
     output << L"Watcher: " << (watcher_.IsRunning() ? L"running" : L"recovering") << L"\n";
     output << L"Tracked files: " << snapshot_.trackedFileCount << L"\n";
@@ -1207,6 +1329,7 @@ std::wstring TrayApp::BuildDiagnostics(const AggregateSnapshot& aggregate) const
     }
     output << webMonitor_.Diagnostics();
     output << celebrationController_.BuildDiagnostics();
+    output << updater_.BuildDiagnostics();
 
     return output.str();
 }

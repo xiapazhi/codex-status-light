@@ -37,6 +37,7 @@ add_executable(StatusLight
     src/ProcessMonitor.cpp
     src/IconRenderer.cpp
     src/TrayApp.cpp
+    src/updater/AutoUpdater.cpp
     src/celebration/CelebrationController.cpp
     src/celebration/CelebrationPolicy.cpp
     src/celebration/FireworkAudioPlayer.cpp
@@ -68,7 +69,7 @@ target_compile_definitions(StatusLight PRIVATE
     WIN32_LEAN_AND_MEAN
 )
 
-target_link_libraries(StatusLight PRIVATE advapi32 winmm)
+target_link_libraries(StatusLight PRIVATE advapi32 wininet winmm)
 
 if (MSVC)
     target_compile_options(StatusLight PRIVATE /W4 /permissive- /utf-8)

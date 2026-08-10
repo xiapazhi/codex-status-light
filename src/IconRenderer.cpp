@@ -61,7 +61,13 @@ bool IconKey::operator<(const IconKey& other) const
     if (appMarker != other.appMarker) {
         return appMarker < other.appMarker;
     }
-    return browserMarker < other.browserMarker;
+    if (browserMarker != other.browserMarker) {
+        return browserMarker < other.browserMarker;
+    }
+    if (updateProgressRing != other.updateProgressRing) {
+        return updateProgressRing < other.updateProgressRing;
+    }
+    return updateProgressBucket < other.updateProgressBucket;
 }
 
 IconRenderer::~IconRenderer()
@@ -111,7 +117,11 @@ HICON IconRenderer::CreateIcon(const IconKey& key)
         pixels[index] = 0;
     }
 
-    DrawQuotaRing(pixels, kIconSize, key);
+    if (key.updateProgressRing) {
+        DrawProgressRing(pixels, kIconSize, key.updateProgressBucket);
+    } else {
+        DrawQuotaRing(pixels, kIconSize, key);
+    }
     DrawCircle(pixels, kIconSize, 16, 16, 10, CenterColor(key));
     DrawSourceMarkers(pixels, kIconSize, key);
     if (key.warningBadge) {
@@ -180,6 +190,42 @@ void IconRenderer::DrawQuotaRing(unsigned int* pixels, int size, const IconKey& 
             } else {
                 pixels[y * size + x] = Argb(255, 48, 50, 56);
             }
+        }
+    }
+}
+
+void IconRenderer::DrawProgressRing(unsigned int* pixels, int size, int progressBucket)
+{
+    if (progressBucket < 0) {
+        progressBucket = 0;
+    }
+    if (progressBucket > 100) {
+        progressBucket = 100;
+    }
+
+    const int centerX = 16;
+    const int centerY = 16;
+    const double outerRadius = 15.0;
+    const double innerRadius = 12.0;
+    const double progressAngle = 360.0 * progressBucket / 100.0;
+    const unsigned int trackColor = Argb(255, 48, 50, 56);
+    const unsigned int progressColor = Argb(255, 255, 196, 0);
+
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const double dx = static_cast<double>(x - centerX);
+            const double dy = static_cast<double>(y - centerY);
+            const double distance = std::sqrt(dx * dx + dy * dy);
+            if (distance < innerRadius || distance > outerRadius) {
+                continue;
+            }
+
+            double angle = std::atan2(dx, -dy) * 180.0 / 3.14159265358979323846;
+            if (angle < 0.0) {
+                angle += 360.0;
+            }
+
+            pixels[y * size + x] = angle <= progressAngle ? progressColor : trackColor;
         }
     }
 }

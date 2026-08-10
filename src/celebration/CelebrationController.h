@@ -35,6 +35,7 @@ public:
     void Shutdown();
     void OnAggregateTransition(const AggregateTransition& transition);
     void PlayTestDot();
+    void PlayCompletionFirework();
     void ToggleEnabled();
     bool IsEnabled() const noexcept;
     uint32_t LaunchHeightPercent() const noexcept;

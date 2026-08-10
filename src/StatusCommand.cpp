@@ -14,6 +14,8 @@
  */
 #include "StatusCommand.h"
 
+#include "AppVersion.h"
+
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -56,6 +58,7 @@ void StatusCommand::PrintStatus(const StatusSnapshot& snapshot) const
     size_t staleCount = 0;
 
     std::cout << "\nStatus summary\n";
+    std::cout << "Version: " << AppVersion::kStatusLightVersion << "\n";
     if (snapshot.hasSourceError) {
         std::wcout << L"Source error: " << snapshot.errorMessage << L"\n";
     }

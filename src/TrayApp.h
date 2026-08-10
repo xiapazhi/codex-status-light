@@ -19,6 +19,7 @@
 #include "ProcessMonitor.h"
 #include "StatusReader.h"
 #include "celebration/CelebrationController.h"
+#include "updater/AutoUpdater.h"
 #include "web/WebSourceController.h"
 
 #include <Windows.h>
@@ -99,10 +100,13 @@ private:
     void StartOrRecoverWatcher();
     void UpdateTrayIcon();
     void UpdateCelebration(const AggregateSnapshot& aggregate);
+    void UpdateUpdaterCelebration(const UpdateStatus& updateStatus);
+    void ApplyReadyUpdateAfterManualCheck();
     void UpdateVisualTiming(const AggregateSnapshot& aggregate);
     void ShowContextMenu();
     HMENU CreateContextMenu();
     HMENU CreateFireworksMenu();
+    HMENU CreateCopyMenu();
     bool HandleContextMenuCommand(UINT command, bool* keepMenuOpen);
     bool IsFireworkMenuCommand(UINT command) const;
     void OpenCodex();
@@ -110,6 +114,8 @@ private:
     bool OpenMostRecentBrowserTarget();
     void ClearCompletedPrompts();
     void CopyDiagnosticsToClipboard();
+    void CopyUpdateStatusToClipboard();
+    void CopyTextToClipboard(const std::wstring& text);
     void HandleTrayMessage(LPARAM lParam);
     AggregateSnapshot AggregateSessions() const;
     void AppendAppPromptItems(std::vector<PromptItem>* items) const;
@@ -143,6 +149,7 @@ private:
     ProcessMonitor processMonitor_;
     ProcessSnapshot processSnapshot_;
     WebSourceController webMonitor_;
+    AutoUpdater updater_;
     IconRenderer iconRenderer_;
     CelebrationController celebrationController_;
     mutable std::set<std::string> acknowledgedCompletedPromptIds_;
@@ -158,4 +165,9 @@ private:
     std::set<std::string> seenSuccessfulCompletionIds_;
     bool blinkOn_ = true;
     bool celebrationBaselineReady_ = false;
+    bool manualUpdateApplyPending_ = false;
+    bool waitingForUpdateFirework_ = false;
+    bool manualUpdateHadReadyAtStart_ = false;
+    bool manualUpdateFireworkStarted_ = false;
+    bool applyUpdateOnDestroy_ = false;
 };

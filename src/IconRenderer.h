@@ -42,6 +42,8 @@ struct IconKey {
     bool blinkOn = false;
     bool appMarker = false;
     bool browserMarker = false;
+    bool updateProgressRing = false;
+    int updateProgressBucket = 0;
 
     bool operator<(const IconKey& other) const;
 };
@@ -56,6 +58,7 @@ private:
     HICON CreateIcon(const IconKey& key);
     void DrawCircle(unsigned int* pixels, int size, int centerX, int centerY, int radius, unsigned int color);
     void DrawQuotaRing(unsigned int* pixels, int size, const IconKey& key);
+    void DrawProgressRing(unsigned int* pixels, int size, int progressBucket);
     void DrawWarningBadge(unsigned int* pixels, int size);
     void DrawSourceMarkers(unsigned int* pixels, int size, const IconKey& key);
     void DrawSourceArc(unsigned int* pixels, int size, double startAngle, double endAngle);

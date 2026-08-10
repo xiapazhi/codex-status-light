@@ -15,6 +15,8 @@
 #include "InspectCommand.h"
 #include "StatusCommand.h"
 #include "TrayApp.h"
+#include "AppVersion.h"
+#include "updater/AutoUpdater.h"
 #include "web/NativeMessagingHost.h"
 #include "web/WebDebugLog.h"
 #include "web/WebSelfTest.h"
@@ -36,6 +38,9 @@ void PrintUsage()
     std::cout << "  StatusLight.exe --inspect [--codex-home <path>] [--max-files <count>] [--recent-hours <hours>] [--watch] [--poll-seconds <seconds>]\n";
     std::cout << "  StatusLight.exe --self-test-web\n";
     std::cout << "  StatusLight.exe --web-log-path\n";
+    std::cout << "  StatusLight.exe --version\n";
+    std::cout << "  StatusLight.exe --check-update\n";
+    std::cout << "  StatusLight.exe --apply-update <ready-exe-path> <target-exe-path> <parent-pid>\n";
 }
 
 bool ReadSizeArgument(int argc, wchar_t* argv[], int* index, size_t* output)
@@ -125,8 +130,14 @@ int wmain(int argc, wchar_t* argv[])
     bool inspectMode = false;
     bool selfTestWebMode = false;
     bool webLogPathMode = false;
+    bool versionMode = false;
+    bool checkUpdateMode = false;
+    bool applyUpdateMode = false;
     bool statusMode = false;
     bool trayMode = argc == 1;
+    std::wstring applyReadyPath;
+    std::wstring applyTargetPath;
+    DWORD applyParentPid = 0;
     InspectOptions inspectOptions;
     StatusOptions statusOptions;
     TrayOptions trayOptions;
@@ -154,8 +165,61 @@ int wmain(int argc, wchar_t* argv[])
             webLogPathMode = true;
             inspectMode = false;
             selfTestWebMode = false;
+            versionMode = false;
+            checkUpdateMode = false;
+            applyUpdateMode = false;
             statusMode = false;
             trayMode = false;
+            continue;
+        }
+
+        if (argument == L"--version") {
+            versionMode = true;
+            inspectMode = false;
+            selfTestWebMode = false;
+            webLogPathMode = false;
+            checkUpdateMode = false;
+            applyUpdateMode = false;
+            statusMode = false;
+            trayMode = false;
+            continue;
+        }
+
+        if (argument == L"--check-update") {
+            checkUpdateMode = true;
+            inspectMode = false;
+            selfTestWebMode = false;
+            webLogPathMode = false;
+            versionMode = false;
+            applyUpdateMode = false;
+            statusMode = false;
+            trayMode = false;
+            continue;
+        }
+
+        if (argument == L"--apply-update") {
+            if (index + 3 >= argc) {
+                AttachConsoleForCommandLineMode();
+                std::cerr << "--apply-update requires ready path, target path, and parent pid\n";
+                return 2;
+            }
+            applyUpdateMode = true;
+            inspectMode = false;
+            selfTestWebMode = false;
+            webLogPathMode = false;
+            versionMode = false;
+            checkUpdateMode = false;
+            statusMode = false;
+            trayMode = false;
+            applyReadyPath = argv[++index];
+            applyTargetPath = argv[++index];
+            try {
+                applyParentPid = static_cast<DWORD>(std::stoul(argv[++index]));
+            } catch (...) {
+                AttachConsoleForCommandLineMode();
+                std::cerr << "--apply-update parent pid must be a positive integer\n";
+                return 2;
+            }
             continue;
         }
 
@@ -164,6 +228,9 @@ int wmain(int argc, wchar_t* argv[])
             inspectMode = false;
             selfTestWebMode = false;
             webLogPathMode = false;
+            versionMode = false;
+            checkUpdateMode = false;
+            applyUpdateMode = false;
             trayMode = false;
             continue;
         }
@@ -174,6 +241,9 @@ int wmain(int argc, wchar_t* argv[])
             inspectMode = false;
             selfTestWebMode = false;
             webLogPathMode = false;
+            versionMode = false;
+            checkUpdateMode = false;
+            applyUpdateMode = false;
             continue;
         }
 
@@ -241,14 +311,28 @@ int wmain(int argc, wchar_t* argv[])
         return 2;
     }
 
-    if (!inspectMode && !selfTestWebMode && !webLogPathMode && !statusMode && !trayMode) {
+    if (!inspectMode && !selfTestWebMode && !webLogPathMode && !versionMode &&
+        !checkUpdateMode && !applyUpdateMode && !statusMode && !trayMode) {
         AttachConsoleForCommandLineMode();
         PrintUsage();
         return 0;
     }
 
-    if (inspectMode || selfTestWebMode || webLogPathMode || statusMode) {
+    if (inspectMode || selfTestWebMode || webLogPathMode || versionMode || checkUpdateMode || statusMode) {
         AttachConsoleForCommandLineMode();
+    }
+
+    if (versionMode) {
+        std::cout << AppVersion::kStatusLightVersion << "\n";
+        return 0;
+    }
+
+    if (checkUpdateMode) {
+        return AutoUpdater::RunCheckUpdateCommand();
+    }
+
+    if (applyUpdateMode) {
+        return AutoUpdater::RunApplyUpdateCommand(applyReadyPath, applyTargetPath, applyParentPid);
     }
 
     if (inspectOptions.maxFiles == 0 || inspectOptions.recentHours <= 0 || inspectOptions.pollSeconds <= 0 ||
@@ -268,6 +352,11 @@ int wmain(int argc, wchar_t* argv[])
             return 2;
         }
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            CloseHandle(singleInstanceMutex);
+            return 0;
+        }
+
+        if (AutoUpdater::HasReadyUpdate() && AutoUpdater::LaunchStartupApplyHelperIfReady()) {
             CloseHandle(singleInstanceMutex);
             return 0;
         }

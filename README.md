@@ -128,7 +128,35 @@ Diagnostics:
 dist\StatusLight.exe --status
 dist\StatusLight.exe --inspect
 dist\StatusLight.exe --self-test-web
+dist\StatusLight.exe --version
+dist\StatusLight.exe --check-update
 ```
+
+## Auto Update
+
+StatusLight checks Gitee Releases silently by default:
+
+```text
+https://gitee.com/api/v5/repos/yuan_yi/codex-status-light/releases/latest
+```
+
+Release contract:
+
+```text
+tag: v1.2.1
+asset: StatusLight.exe
+optional checksum: StatusLight.exe.sha256
+```
+
+Bump the app version before publishing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\Bump-Version.ps1
+```
+
+The script reads the latest Gitee tag. If the local version is not newer than the remote version, it increments the patch version.
+
+When a newer version is available, the app downloads it in the background without popups, focus changes, or interrupting monitoring. Automatic checks do not play fireworks and do not replace the running `StatusLight.exe`; manual `Check Update` downloads play fireworks and then apply the update immediately.
 
 ## Enable Web Monitoring
 

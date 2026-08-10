@@ -124,6 +124,14 @@ void CelebrationController::PlayTestDot()
     }
 }
 
+void CelebrationController::PlayCompletionFirework()
+{
+    retryIndex_ = 0;
+    if (!TryStartFirework(1)) {
+        ScheduleRetry(kRetryDelaysMs[retryIndex_ - 1]);
+    }
+}
+
 void CelebrationController::ToggleEnabled()
 {
     settings_.fireworksEnabled = !settings_.fireworksEnabled;

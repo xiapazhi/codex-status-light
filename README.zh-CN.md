@@ -128,7 +128,35 @@ dist\StatusLight.exe
 dist\StatusLight.exe --status
 dist\StatusLight.exe --inspect
 dist\StatusLight.exe --self-test-web
+dist\StatusLight.exe --version
+dist\StatusLight.exe --check-update
 ```
+
+## 自动更新
+
+StatusLight 默认从 Gitee Releases 静默检查更新：
+
+```text
+https://gitee.com/api/v5/repos/yuan_yi/codex-status-light/releases/latest
+```
+
+发布约定：
+
+```text
+tag：v1.2.1
+asset：StatusLight.exe
+可选校验：StatusLight.exe.sha256
+```
+
+发布前递增版本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\Bump-Version.ps1
+```
+
+脚本会读取 Gitee 最新 tag；如果本地版本不高于远端版本，则自动递增 patch 版本。
+
+发现新版本后，程序会在后台下载到本地缓存，不弹窗、不抢焦点、不打断当前监听。自动检查不会播放烟花，也不会在运行时替换当前 `StatusLight.exe`；手动点击“检查更新”下载完成后才会播放烟花并即时替换重启。
 
 ## 开启网页监听
 
