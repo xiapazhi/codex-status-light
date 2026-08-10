@@ -8,8 +8,8 @@
 
 namespace AppVersion {
 
-constexpr const char* kStatusLightVersion = "1.2.0";
-constexpr const wchar_t* kStatusLightVersionWide = L"1.2.0";
+constexpr const char* kStatusLightVersion = "1.2.1";
+constexpr const wchar_t* kStatusLightVersionWide = L"1.2.1";
 constexpr const char* kReleaseOwner = "yuan_yi";
 constexpr const char* kReleaseRepo = "codex-status-light";
 
