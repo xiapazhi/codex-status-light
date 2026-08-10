@@ -325,23 +325,21 @@ void ChatGptConversationStore::ApplyConversationState(const PageObserverRecord& 
 
     if (nextState == WebConversationState::Idle && IsActiveState(conversation->state)) {
         const int64_t observedAt = observer.lastObservedAt != 0 ? observer.lastObservedAt : CurrentTimeMs();
-        const bool stableEnough = observedAt - conversation->stateChangedAt >= 2000;
-        if (stableEnough) {
-            if (!conversation->operationSawRunning) {
-                conversation->operationActive = false;
-                conversation->operationSawRunning = false;
-                conversation->terminalReason.reset();
-                SetConversationState(conversation, WebConversationState::Idle, observedAt, "idle-without-running");
-                return;
-            }
-            TerminalEventKey key { conversation->conversationKey, conversation->operationGeneration };
-            if (handledTerminalEvents_.find(key) == handledTerminalEvents_.end()) {
-                handledTerminalEvents_.insert(key);
-                conversation->operationActive = false;
-                conversation->operationSawRunning = false;
-                conversation->terminalReason = TerminalReason { "stable-idle-after-active" };
-                SetConversationState(conversation, WebConversationState::TerminalSuccess, observedAt, "stable-idle-after-active");
-            }
+        if (!conversation->operationSawRunning) {
+            conversation->operationActive = false;
+            conversation->operationSawRunning = false;
+            conversation->terminalReason.reset();
+            SetConversationState(conversation, WebConversationState::Idle, observedAt, "idle-without-running");
+            return;
+        }
+
+        TerminalEventKey key { conversation->conversationKey, conversation->operationGeneration };
+        if (handledTerminalEvents_.find(key) == handledTerminalEvents_.end()) {
+            handledTerminalEvents_.insert(key);
+            conversation->operationActive = false;
+            conversation->operationSawRunning = false;
+            conversation->terminalReason = TerminalReason { "idle-after-active" };
+            SetConversationState(conversation, WebConversationState::TerminalSuccess, observedAt, "idle-after-active");
         }
         return;
     }

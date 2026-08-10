@@ -252,8 +252,8 @@ int WebSelfTest::Run()
     ok = Expect(state.waitingCount == 1, "P3 waiting input is counted") && ok;
     ok = Expect(state.duplicateObservers == 1, "P4 duplicate observer count is diagnostic only") && ok;
 
-    store.ApplyObservation(MakeObserver("observer-a", keyA, WebObservedPageState::Idle, 4200, "stable-idle-after-active"));
-    store.ApplyObservation(MakeObserver("observer-b", keyB, WebObservedPageState::Idle, 4300, "stable-idle-after-active"));
+    store.ApplyObservation(MakeObserver("observer-a", keyA, WebObservedPageState::Idle, 1200, "no_active_signal"));
+    store.ApplyObservation(MakeObserver("observer-b", keyB, WebObservedPageState::Idle, 1300, "no_active_signal"));
     state = aggregator.Aggregate(store.Conversations(), 1, 3, store.ObserverCount(), 0, WebMonitorHealth::Normal);
     ok = Expect(state.completedCount == 1, "P4 terminal event is deduplicated by operationGeneration") && ok;
     ok = Expect(state.waitingCount == 1, "P5 waiting keeps priority over completed") && ok;
@@ -306,9 +306,9 @@ int WebSelfTest::Run()
         "P7 edit-only idle does not create successful completion") && ok;
 
     editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::Running, 4000, "visible-stop-control"));
-    editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::Idle, 6300, "stable-idle-after-active"));
+    editStore.ApplyObservation(MakeObserver("edit-tab", editKey, WebObservedPageState::Idle, 4100, "no_active_signal"));
     state = aggregator.Aggregate(editStore.Conversations(), 1, 1, editStore.ObserverCount(), 0, WebMonitorHealth::Normal);
-    ok = Expect(state.completedCount == 1, "P7 running then idle creates successful completion") && ok;
+    ok = Expect(state.completedCount == 1, "P7 running then idle immediately creates successful completion") && ok;
 
     ChatGptConversationStore snapshotCleanupStore;
     const std::string staleKey = snapshotCleanupStore.BuildConversationKey(browserInstanceId, conversationOne, 8, "doc-stale");

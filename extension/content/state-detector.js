@@ -17,22 +17,51 @@ function findMainRoot() {
     document.body
 }
 
-function hasElement(root, selector) {
-  return Boolean(root && root.querySelector(selector))
+function isVisibleElement(element) {
+  if (!element || !(element instanceof Element)) {
+    return false
+  }
+
+  const style = window.getComputedStyle(element)
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false
+  }
+
+  const rect = element.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
+
+function isEnabledElement(element) {
+  return !element.disabled && element.getAttribute('aria-disabled') !== 'true'
+}
+
+function hasVisibleElement(root, selector, requireEnabled = false) {
+  if (!root) {
+    return false
+  }
+
+  const elements = root.querySelectorAll(selector)
+  for (const element of elements) {
+    const isUsable = !requireEnabled || isEnabledElement(element)
+    if (isUsable && isVisibleElement(element)) {
+      return true
+    }
+  }
+  return false
 }
 
 function hasStopControl(root) {
-  return hasElement(root, 'button[data-testid="stop-button"]') ||
-    hasElement(root, 'button[data-testid*="stop" i]') ||
-    hasElement(root, 'button[aria-label="Stop streaming"]') ||
-    hasElement(root, 'button[aria-label="Stop generating"]') ||
-    hasElement(root, 'button[aria-label*="Stop" i]') ||
-    hasElement(root, 'button[aria-label*="停止" i]') ||
-    hasElement(root, 'button[aria-label*="终止" i]')
+  return hasVisibleElement(root, 'button[data-testid="stop-button"]', true) ||
+    hasVisibleElement(root, 'button[data-testid*="stop" i]', true) ||
+    hasVisibleElement(root, 'button[aria-label="Stop streaming"]', true) ||
+    hasVisibleElement(root, 'button[aria-label="Stop generating"]', true) ||
+    hasVisibleElement(root, 'button[aria-label*="Stop" i]', true) ||
+    hasVisibleElement(root, 'button[aria-label*="停止" i]', true) ||
+    hasVisibleElement(root, 'button[aria-label*="终止" i]', true)
 }
 
 function hasProgress(root) {
-  return hasElement(root, '[role="progressbar"]')
+  return hasVisibleElement(root, '[role="progressbar"]')
 }
 
 function hasBusyAssistant(root) {
@@ -57,13 +86,13 @@ function hasExplicitGate(root) {
     'select',
   ]
 
-  return gateSelectors.some((selector) => hasElement(root, selector))
+  return gateSelectors.some((selector) => hasVisibleElement(root, selector, true))
 }
 
 function hasTerminalFailure(root) {
-  return hasElement(root, 'button[data-testid*="retry" i]') ||
-    hasElement(root, 'button[aria-label*="Retry" i]') ||
-    hasElement(root, 'button[aria-label*="Try again" i]')
+  return hasVisibleElement(root, 'button[data-testid*="retry" i]', true) ||
+    hasVisibleElement(root, 'button[aria-label*="Retry" i]', true) ||
+    hasVisibleElement(root, 'button[aria-label*="Try again" i]', true)
 }
 
 window.StatusLightStateDetector = {
