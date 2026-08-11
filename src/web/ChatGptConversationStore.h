@@ -63,6 +63,7 @@ private:
     void MigrateConversationIfNeeded(const PageObserverRecord& observer);
     void RebuildConversationObservers();
     void ApplyConversationState(const PageObserverRecord& observer, WebConversationRecord* conversation);
+    void ClearActiveContributionsWithoutHealthyObservers(int64_t observedAt);
     void ClearActiveContributionIfNoHealthyObserver(WebConversationRecord* conversation, int64_t observedAt);
     void ChooseOwner(WebConversationRecord* conversation) const;
     void SetConversationState(

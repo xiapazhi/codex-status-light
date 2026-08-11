@@ -310,6 +310,16 @@ int WebSelfTest::Run()
     state = aggregator.Aggregate(editStore.Conversations(), 1, 1, editStore.ObserverCount(), 0, WebMonitorHealth::Normal);
     ok = Expect(state.completedCount == 1, "P7 running then idle immediately creates successful completion") && ok;
 
+    ChatGptConversationStore observerMoveStore;
+    const std::string oldMoveKey = observerMoveStore.BuildConversationKey(browserInstanceId, conversationOne, 6, "doc-move");
+    const std::string newMoveKey = observerMoveStore.BuildConversationKey(browserInstanceId, conversationTwo, 6, "doc-move");
+    observerMoveStore.ApplyObservation(MakeObserver("moving-tab", oldMoveKey, WebObservedPageState::Running, 1000, "visible-stop-control"));
+    observerMoveStore.ApplyObservation(MakeObserver("moving-tab", newMoveKey, WebObservedPageState::Idle, 5000, "snapshot-idle"));
+    state = aggregator.Aggregate(observerMoveStore.Conversations(), 1, 1, observerMoveStore.ObserverCount(), 0, WebMonitorHealth::Normal);
+    ok = Expect(
+        state.runningCount == 0 && state.waitingCount == 0,
+        "P8 idle snapshot clears superseded running conversation") && ok;
+
     ChatGptConversationStore snapshotCleanupStore;
     const std::string staleKey = snapshotCleanupStore.BuildConversationKey(browserInstanceId, conversationOne, 8, "doc-stale");
     const std::string currentKey = snapshotCleanupStore.BuildConversationKey(browserInstanceId, conversationTwo, 9, "doc-current");

@@ -507,6 +507,21 @@ std::string WebSourceController::ApplyTabState(const JsonValue& root)
     record.observerHealthy = true;
 
     std::lock_guard<std::mutex> lock(mutex_);
+    const std::string tabKey = TabKey(browserInstanceId, tabId);
+    auto existingTabObservers = observersByTab_.find(tabKey);
+    if (existingTabObservers != observersByTab_.end()) {
+        for (auto observer = existingTabObservers->second.begin(); observer != existingTabObservers->second.end();) {
+            if (*observer == record.observerId) {
+                ++observer;
+                continue;
+            }
+            store_.RemoveObserver(*observer);
+            lastSequenceByObserver_.erase(*observer);
+            WebDebugLog::WriteUtf8(L"WebSource", "remove superseded tab observer=" + *observer);
+            observer = existingTabObservers->second.erase(observer);
+        }
+    }
+
     if (sequence > 0) {
         const uint64_t lastSequence = lastSequenceByObserver_[record.observerId];
         if (sequence <= lastSequence) {
@@ -517,7 +532,7 @@ std::string WebSourceController::ApplyTabState(const JsonValue& root)
     }
 
     browserInstances_.insert(browserInstanceId);
-    observersByTab_[TabKey(browserInstanceId, tabId)].insert(record.observerId);
+    observersByTab_[tabKey].insert(record.observerId);
     store_.ApplyObservation(record);
     if (activeSnapshotBrowserInstanceId_ == browserInstanceId) {
         activeSnapshotObserverIds_.insert(record.observerId);

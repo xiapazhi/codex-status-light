@@ -103,6 +103,7 @@ void ChatGptConversationStore::ApplyObservation(const PageObserverRecord& observ
 
     ApplyConversationState(observer, &conversation);
     RebuildConversationObservers();
+    ClearActiveContributionsWithoutHealthyObservers(observer.lastObservedAt);
     ChooseOwner(&conversation);
 }
 
@@ -346,6 +347,13 @@ void ChatGptConversationStore::ApplyConversationState(const PageObserverRecord& 
 
     if (conversation->state == WebConversationState::Unknown) {
         SetConversationState(conversation, WebConversationState::Idle, observer.lastObservedAt, observer.reason);
+    }
+}
+
+void ChatGptConversationStore::ClearActiveContributionsWithoutHealthyObservers(int64_t observedAt)
+{
+    for (auto& item : conversationsByKey_) {
+        ClearActiveContributionIfNoHealthyObserver(&item.second, observedAt);
     }
 }
 
